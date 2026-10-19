@@ -123,6 +123,28 @@ pub fn normalize_remote(u: &str) -> String {
     s.trim_end_matches('/').trim_end_matches(".git").to_lowercase()
 }
 
+/// Files whose presence marks a directory as a project root.
+pub const MANIFESTS: &[&str] = &[
+    "Cargo.toml", "package.json", "pyproject.toml", "setup.py", "setup.cfg", "go.mod", "Package.swift", "pom.xml", "build.gradle",
+    "build.gradle.kts", "Gemfile", "composer.json", "CMakeLists.txt", "mix.exs", "deno.json", "pubspec.yaml", "Makefile", "flake.nix",
+];
+
+/// Nearest directory at or above `cwd` that contains a project manifest. The walk stops at (and never returns)
+/// the home directory or the filesystem root, so a stray `~/package.json` does not turn every folder into one project.
+pub fn manifest_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    let mut d = Some(cwd);
+    while let Some(dir) = d {
+        if Some(dir) == home || dir.parent().is_none() {
+            return None;
+        }
+        if MANIFESTS.iter().any(|m| dir.join(m).is_file()) {
+            return Some(dir.to_path_buf());
+        }
+        d = dir.parent();
+    }
+    None
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Manifest {
     pub name: Option<String>,
@@ -229,7 +251,9 @@ pub fn pid_for(root: &Path, remote: &Option<String>) -> String {
 impl Resolver {
     /// Resolve the project for a working directory. Home dir and `/` are treated as "no project".
     pub fn resolve(&self, store: &Store, cwd: &str) -> Option<Resolved> {
+        // Resolve symlinks first so every path spelling of a directory maps to one project.
         let cwd = PathBuf::from(cwd);
+        let cwd = cwd.canonicalize().unwrap_or(cwd);
         let now = now_ts();
         if let Some((t, r)) = self.cache.lock().get(&cwd) {
             if now - t < 60 {
@@ -245,9 +269,12 @@ impl Resolver {
     }
 
     fn resolve_uncached(&self, store: &Store, cwd: &Path) -> Option<Resolved> {
-        let home = dirs::home_dir();
+        let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
         let git = git_info(cwd);
-        let root = git.as_ref().map(|g| g.root.clone()).unwrap_or_else(|| cwd.to_path_buf());
+        let root = match &git {
+            Some(g) => g.root.clone(),
+            None => manifest_root(cwd, home.as_deref()).unwrap_or_else(|| cwd.to_path_buf()),
+        };
         if Some(&root) == home.as_ref() || root == Path::new("/") || root.as_os_str().is_empty() {
             return None;
         }
@@ -324,6 +351,24 @@ pub fn mentioned_projects(store: &Store, text: &str, exclude: Option<&str>) -> V
         .collect()
 }
 
+/// Does `text` explicitly name `p`: its name or an alias as a word, its root path, or a relative path
+/// (from the extracted `entities`) that exists inside its root?
+pub fn names_project(p: &Project, text: &str, entities: &[String]) -> bool {
+    let lower = text.to_lowercase();
+    let by_name = std::iter::once(&p.name).chain(p.aliases.iter()).any(|n| {
+        let n = n.to_lowercase();
+        n.chars().count() >= 3 && !n.starts_with('/') && contains_word(&lower, &n)
+    });
+    if by_name || (!p.root.is_empty() && text.contains(&p.root)) {
+        return true;
+    }
+    let root = Path::new(&p.root);
+    entities.iter().any(|e| {
+        let e = e.trim_start_matches("./");
+        (e.contains('/') || e.contains('.')) && !e.contains(' ') && !Path::new(e).is_absolute() && !p.root.is_empty() && root.join(e).exists()
+    })
+}
+
 fn contains_word(hay: &str, needle: &str) -> bool {
     let mut start = 0;
     while let Some(i) = hay[start..].find(needle) {
@@ -373,5 +418,52 @@ mod tests {
         assert_eq!(r.project.summary, "A thing that does stuff");
         assert!(r.project.stack.contains("rust"));
         assert_eq!(r.git.unwrap().branch, "main");
+    }
+
+    #[test]
+    fn non_git_subdirectory_walks_up_to_manifest() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("notes-tool");
+        std::fs::create_dir_all(root.join("lib/parsers/inner")).unwrap();
+        std::fs::write(root.join("pyproject.toml"), "[project]\nname = \"notes-tool\"\ndescription = \"Parses notes\"\n").unwrap();
+        let store = Store::open_memory().unwrap();
+        let res = Resolver::default();
+        let deep = res.resolve(&store, root.join("lib/parsers/inner").to_str().unwrap()).unwrap();
+        let top = res.resolve(&store, root.to_str().unwrap()).unwrap();
+        assert_eq!(deep.project.pid, top.project.pid);
+        assert_eq!(deep.project.name, "notes-tool");
+        // a plain directory with no manifest anywhere above is still not a project
+        let plain = d.path().join("scratch/a");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(res.resolve(&store, plain.to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn walk_up_stops_at_home() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        std::fs::create_dir_all(home.join("Downloads/x")).unwrap();
+        std::fs::write(home.join("package.json"), "{}").unwrap();
+        assert_eq!(manifest_root(&home.join("Downloads/x"), Some(&home)), None);
+        std::fs::write(home.join("Downloads/package.json"), "{}").unwrap();
+        assert_eq!(manifest_root(&home.join("Downloads/x"), Some(&home)), Some(home.join("Downloads")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_path_maps_to_same_project() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("real/widget");
+        std::fs::create_dir_all(real.join(".git")).unwrap();
+        std::fs::write(real.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        let link = d.path().join("link-to-widget");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let store = Store::open_memory().unwrap();
+        let res = Resolver::default();
+        let a = res.resolve(&store, real.join("src").to_str().unwrap()).unwrap();
+        let b = res.resolve(&store, link.join("src").to_str().unwrap()).unwrap();
+        assert_eq!(a.project.pid, b.project.pid);
+        assert_eq!(store.list_projects().len(), 1);
     }
 }

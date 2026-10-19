@@ -30,6 +30,40 @@ pub struct AppState {
 
 pub type Shared = Arc<AppState>;
 
+/// Wrap a listener so every accepted socket gets `TCP_NODELAY`. The SSE rewriter emits many small frames;
+/// with Nagle + delayed ACK each one can stall ~40 ms on loopback.
+pub fn nodelay_listener(listener: tokio::net::TcpListener) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = std::net::SocketAddr> {
+    use axum::serve::ListenerExt;
+    listener.tap_io(|tcp| {
+        if let Err(e) = tcp.set_nodelay(true) {
+            tracing::debug!("failed to set TCP_NODELAY on accepted connection: {e}");
+        }
+    })
+}
+
+/// Serve the gateway router with `TCP_NODELAY` on accepted sockets.
+pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
+    axum::serve(nodelay_listener(listener), router).await
+}
+
+/// Like [`serve`], stopping gracefully when `shutdown` resolves.
+pub async fn serve_with_shutdown<F>(listener: tokio::net::TcpListener, router: Router, shutdown: F) -> std::io::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    axum::serve(nodelay_listener(listener), router).with_graceful_shutdown(shutdown).await
+}
+
+/// The upstream HTTP client (`TCP_NODELAY` on, so streamed requests/continuations are not delayed by Nagle).
+pub fn upstream_client(timeout_secs: u64) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .tcp_nodelay(true)
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(timeout_secs.max(1)))
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .build()
+}
+
 pub fn router(state: Shared) -> Router {
     Router::new()
         .route("/health", get(|| async { Json(json!({"ok": true, "name": "uni-mem", "version": env!("CARGO_PKG_VERSION")})) }))
@@ -238,10 +272,13 @@ pub fn aug_anchor(session: &str, prev_key: &str, this_key: &str) -> String {
     hash_hex(&["aug", session, prev_key, this_key])
 }
 
-/// Expansion anchors are keyed on the visible message only (it contains globally unique tool-call ids and
-/// generated text), so they survive session resume / fork in the harness.
-pub fn exp_anchor(visible_key: &str) -> String {
-    hash_hex(&["exp", visible_key])
+/// Expansion anchors are keyed on the session, the key of the message before the visible one, and the visible
+/// message's own key (which already folds in the harness-visible tool-call ids / call_ids, the only globally unique
+/// content in it). Including the session keeps one conversation's hidden rounds (our tool calls and their results)
+/// from ever being replayed into another conversation that happens to share a prompt and a deterministic reply.
+/// When the session key itself is a content-hash fallback, the tool-call ids are what still tells conversations apart.
+pub fn exp_anchor(session: &str, prev_key: &str, visible_key: &str) -> String {
+    hash_hex(&["exp", session, prev_key, visible_key])
 }
 
 /// Build the augmentation text for a new user prompt: optional session preamble + passive recall.
@@ -335,4 +372,30 @@ async fn api_remember(State(st): State<Shared>, headers: HeaderMap, Json(v): Jso
 
 pub fn bytes_of(v: &Value) -> Bytes {
     Bytes::from(serde_json::to_vec(v).unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn accepted_sockets_have_nodelay() {
+        use axum::serve::Listener;
+        let raw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = raw.local_addr().unwrap();
+        let mut l = nodelay_listener(raw);
+        let client = tokio::spawn(async move { tokio::net::TcpStream::connect(addr).await.unwrap() });
+        let (io, _) = l.accept().await;
+        assert!(io.nodelay().unwrap(), "TCP_NODELAY must be set on accepted connections");
+        drop(client.await.unwrap());
+        assert!(upstream_client(30).is_ok());
+    }
+
+    #[test]
+    fn expansion_anchor_depends_on_session_and_previous_message() {
+        let a = exp_anchor("sess-1", "u:prev", "vis");
+        assert_ne!(a, exp_anchor("sess-2", "u:prev", "vis"));
+        assert_ne!(a, exp_anchor("sess-1", "u:other", "vis"));
+        assert_eq!(a, exp_anchor("sess-1", "u:prev", "vis"));
+    }
 }

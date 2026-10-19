@@ -459,3 +459,43 @@ async fn count_tokens_includes_our_tools() {
     assert_eq!(s[0].path, "/v1/messages/count_tokens");
     assert_eq!(names_of_tools(&s[0].body()).len(), 5);
 }
+
+#[tokio::test]
+async fn expansion_overlays_never_cross_sessions() {
+    // Two conversations send the same opener and the upstream answers both identically (a deterministic reply
+    // with a hidden unimem_recall round). Session B's follow-up must not get session A's hidden rounds.
+    let recall = json!({"query": "release checklist"});
+    let round = |id: &str, tool_id: &str| {
+        Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"One moment."},{"type":"tool_use","id":tool_id,"name":"unimem_recall","input":recall}],"stop_reason":"tool_use","usage":{"input_tokens":3,"output_tokens":2}}))
+    };
+    let fin = |id: &str| Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"No checklist on file."}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}));
+    let ok = |id: &str| Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}));
+    let e = env(vec![round("a1", "toolu_sessA"), fin("a2"), round("b1", "toolu_sessB"), fin("b2"), ok("a3"), ok("b3")]).await;
+    let send = |session: &'static str, body: Value| {
+        e.client
+            .post(format!("{}/v1/messages", e.gw))
+            .header("x-api-key", "sk-test")
+            .header("anthropic-version", "2023-06-01")
+            .header("x-claude-code-session-id", session)
+            .header("user-agent", "claude-cli/2.0 (external)")
+            .json(&body)
+            .send()
+    };
+    const SA: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+    const SB: &str = "bbbbbbbb-0000-4000-8000-000000000002";
+    let u1 = json!({"role":"user","content":"what is on the release checklist?"});
+    let va: Value = send(SA, agent_req(json!([u1.clone()]), false)).await.unwrap().json().await.unwrap();
+    let vb: Value = send(SB, agent_req(json!([u1.clone()]), false)).await.unwrap().json().await.unwrap();
+    assert_eq!(va["content"], vb["content"], "both sessions see the same visible reply");
+
+    let follow = |v: &Value| agent_req(json!([u1.clone(), {"role":"assistant","content": v["content"]}, {"role":"user","content":"thanks"}]), false);
+    send(SA, follow(&va)).await.unwrap().bytes().await.unwrap();
+    send(SB, follow(&vb)).await.unwrap().bytes().await.unwrap();
+    let seen = e.seen();
+    assert_eq!(seen.len(), 6);
+    let a_next = seen[4].body().to_string();
+    let b_next = seen[5].body().to_string();
+    assert!(a_next.contains("toolu_sessA") && !a_next.contains("toolu_sessB"), "session A replays only its own rounds");
+    assert!(b_next.contains("toolu_sessB"), "session B replays its own hidden round");
+    assert!(!b_next.contains("toolu_sessA"), "session B must not receive session A's hidden rounds");
+}

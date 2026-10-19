@@ -22,8 +22,8 @@
 //! items are anchored on the visible item they precede or — for a trailing run (mixed turns, or continuation
 //! stopped by the limit / an upstream error) — on the last visible item they follow:
 //!
-//! * before visible item `Y`: anchor `exp_anchor(hash("rsp-before", key(item before Y), key(Y)))`
-//! * after visible item `X`:  anchor `exp_anchor(hash("rsp-after",  key(item before X), key(X)))`
+//! * before visible item `Y`: anchor `exp_anchor(session, key(item before Y), hash("rsp-before", key(Y)))`
+//! * after visible item `X`:  anchor `exp_anchor(session, key(item before X), hash("rsp-after",  key(X)))`
 //!
 //! payload `{"v": 1, "items": [ {"type":"function_call",…}, {"type":"function_call_output",…} ]}`.
 //! Item keys: `call_id` for calls / outputs, trimmed text for messages, `encrypted_content` (else summary text,
@@ -157,12 +157,12 @@ pub fn item_key(it: &Value) -> String {
     }
 }
 
-pub fn before_anchor(prev: &str, key: &str) -> String {
-    exp_anchor(&hash_hex(&["rsp-before", prev, key]))
+pub fn before_anchor(session: &str, prev: &str, key: &str) -> String {
+    exp_anchor(session, prev, &hash_hex(&["rsp-before", key]))
 }
 
-pub fn after_anchor(prev: &str, key: &str) -> String {
-    exp_anchor(&hash_hex(&["rsp-after", prev, key]))
+pub fn after_anchor(session: &str, prev: &str, key: &str) -> String {
+    exp_anchor(session, prev, &hash_hex(&["rsp-after", key]))
 }
 
 /// The user's new input if `it` is a prompt (a user message with real text, not only harness context).
@@ -239,8 +239,8 @@ fn req_info(headers: &HeaderMap, body: &Value, input: &[Value]) -> ReqInfo {
 
 // ================================================================ overlay replay
 
-fn load_items(st: &AppState, anchor: &str) -> Option<Vec<Value>> {
-    match st.engine.store.get_overlay(anchor) {
+fn load_items(st: &AppState, anchor: &str, session: &str) -> Option<Vec<Value>> {
+    match st.engine.store.get_overlay(anchor, session) {
         Some((k, p)) if k == K_ITEMS => p["items"].as_array().filter(|a| !a.is_empty()).cloned(),
         _ => None,
     }
@@ -253,13 +253,13 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>, expand: bool) -> Vec<V
         let prev = if i == 0 { "" } else { keys[i - 1].as_str() };
         let model = expand && is_model_item(&it);
         if model {
-            if let Some(items) = load_items(st, &before_anchor(prev, &keys[i])) {
+            if let Some(items) = load_items(st, &before_anchor(session, prev, &keys[i]), session) {
                 out.extend(items);
             }
         }
         let mut it = it;
         if is_message(&it) && st_of(&it, "role") == "user" {
-            if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i])) {
+            if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i]), session) {
                 if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
                     append_part(&mut it, t);
                 }
@@ -267,7 +267,7 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>, expand: bool) -> Vec<V
         }
         out.push(it);
         if model {
-            if let Some(items) = load_items(st, &after_anchor(prev, &keys[i])) {
+            if let Some(items) = load_items(st, &after_anchor(session, prev, &keys[i]), session) {
                 out.extend(items);
             }
         }
@@ -362,7 +362,7 @@ fn finalize(st: &AppState, t: &Turn, rounds: &[RoundRec]) -> Vec<Value> {
     for (vis, it) in rounds.iter().flat_map(|r| r.real(t.keep_ids)) {
         if vis {
             if !pending.is_empty() {
-                put(before_anchor(&vis_prev[j], &vis_keys[j]), &pending);
+                put(before_anchor(&t.ctx.session, &vis_prev[j], &vis_keys[j]), &pending);
                 pending.clear();
             }
             j += 1;
@@ -374,7 +374,7 @@ fn finalize(st: &AppState, t: &Turn, rounds: &[RoundRec]) -> Vec<Value> {
         if j == 0 {
             tracing::debug!("response has no visible items; hidden items not stored");
         } else {
-            put(after_anchor(&vis_prev[j - 1], &vis_keys[j - 1]), &pending);
+            put(after_anchor(&t.ctx.session, &vis_prev[j - 1], &vis_keys[j - 1]), &pending);
         }
     }
     visible
@@ -446,7 +446,7 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     if let (Some(text), Some(last_key)) = (prompt.as_deref(), keys.last()) {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };
         let anchor = aug_anchor(&info.session, prev, last_key);
-        if st.engine.store.get_overlay(&anchor).is_none() {
+        if st.engine.store.get_overlay(&anchor, &info.session).is_none() {
             record_turn(&st, &ctx, "user", text);
             let aug = build_augmentation(&st, &ctx, text).await;
             if let (Some(a), Some(m)) = (aug.as_deref(), input.last_mut()) {

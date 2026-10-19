@@ -417,7 +417,7 @@ async fn main() -> Result<()> {
             println!("db:        {}", cfg.db_path().display());
             println!("memories:  {total} live");
             let mut cs: Vec<_> = counts.into_iter().collect();
-            cs.sort_by(|a, b| b.1.cmp(&a.1));
+            cs.sort_by_key(|a| std::cmp::Reverse(a.1));
             for (s, n) in cs {
                 println!("  {:>6}  {}", n, scope_label(&e, &s));
             }
@@ -482,11 +482,7 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
         cfg.listen = l;
     }
     let engine = Arc::new(open(&cfg)?);
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .read_timeout(Duration::from_secs(cfg.upstream.timeout_secs.max(1)))
-        .pool_idle_timeout(Duration::from_secs(90))
-        .build()?;
+    let client = gateway::upstream_client(cfg.upstream.timeout_secs)?;
     let state = Arc::new(AppState { engine: engine.clone(), client });
 
     unimem::distill::spawn(engine.clone());
@@ -518,10 +514,9 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
     println!("  Codex:        unimem setup codex   (model_provider with base_url http://{addr}/v1, wire_api = \"responses\")");
     println!("  MCP only:     http://{addr}/mcp");
 
-    axum::serve(listener, gateway::router(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    gateway::serve_with_shutdown(listener, gateway::router(state), async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
     Ok(())
 }

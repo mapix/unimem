@@ -138,7 +138,7 @@ fn vec_to_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 fn blob_to_vec(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
 }
 
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -617,17 +617,22 @@ impl Store {
     }
 
     // ---------- overlays ----------
+    /// Store an overlay. A re-store under the same anchor by the *same* session replaces it (a retried turn
+    /// produced new hidden rounds); an existing overlay owned by another session is never touched.
     pub fn put_overlay(&self, anchor: &str, session: &str, kind: &str, payload: &serde_json::Value) -> Result<()> {
         self.conn.lock().execute(
-            "INSERT INTO overlays(anchor,session,kind,payload,created_at) VALUES (?,?,?,?,?) ON CONFLICT(anchor) DO NOTHING",
+            "INSERT INTO overlays(anchor,session,kind,payload,created_at) VALUES (?,?,?,?,?) \
+             ON CONFLICT(anchor) DO UPDATE SET kind=excluded.kind, payload=excluded.payload, created_at=excluded.created_at \
+             WHERE overlays.session = excluded.session",
             params![anchor, session, kind, payload.to_string(), now_ts()],
         )?;
         Ok(())
     }
 
-    pub fn get_overlay(&self, anchor: &str) -> Option<(String, serde_json::Value)> {
+    /// Fetch an overlay owned by `session` (overlays are never served across sessions).
+    pub fn get_overlay(&self, anchor: &str, session: &str) -> Option<(String, serde_json::Value)> {
         let c = self.conn.lock();
-        c.query_row("SELECT kind, payload FROM overlays WHERE anchor=?", [anchor], |r| {
+        c.query_row("SELECT kind, payload FROM overlays WHERE anchor=? AND session=?", [anchor, session], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })
         .optional()
@@ -652,5 +657,25 @@ impl Store {
         let c = self.conn.lock();
         let mut st = c.prepare(&format!("SELECT ts,kind,data FROM traces ORDER BY id DESC LIMIT {n}")).unwrap();
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn overlays_are_session_owned() {
+        let s = Store::open_memory().unwrap();
+        s.put_overlay("anc1", "sess-a", "k", &json!({"v": "a"})).unwrap();
+        // another session can neither read nor overwrite it
+        assert!(s.get_overlay("anc1", "sess-b").is_none());
+        s.put_overlay("anc1", "sess-b", "k", &json!({"v": "b"})).unwrap();
+        assert_eq!(s.get_overlay("anc1", "sess-a").unwrap().1, json!({"v": "a"}));
+        assert!(s.get_overlay("anc1", "sess-b").is_none());
+        // the owning session can update it (a retried turn)
+        s.put_overlay("anc1", "sess-a", "k", &json!({"v": "a2"})).unwrap();
+        assert_eq!(s.get_overlay("anc1", "sess-a").unwrap().1, json!({"v": "a2"}));
     }
 }

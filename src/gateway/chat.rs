@@ -18,7 +18,7 @@
 //!
 //! ## Overlay payload
 //!
-//! `expand_assistant` (anchor = `exp_anchor(hash("chat-vis", key(previous message), visible_key(msg)))`):
+//! `expand_assistant` (anchor = `exp_anchor(session, key(previous message), hash("chat-vis", visible_key(msg)))`):
 //! `{"v": 1, "messages": [ {"role":"assistant",…}, {"role":"tool",…}, …, {"role":"assistant",…} (, {"role":"tool",…}) ]}`.
 //! The visible key hashes the assistant text with all whitespace removed (robust to how rounds were joined)
 //! plus the harness's tool call ids. Requests with `n > 1` are relayed untouched (merging several choices across
@@ -119,8 +119,8 @@ pub fn msg_key(m: &Value) -> String {
     }
 }
 
-pub fn expand_anchor(prev: &str, vis: &str) -> String {
-    exp_anchor(&hash_hex(&["chat-vis", prev, vis]))
+pub fn expand_anchor(session: &str, prev: &str, vis: &str) -> String {
+    exp_anchor(session, prev, &hash_hex(&["chat-vis", vis]))
 }
 
 fn prompt_text(m: &Value) -> Option<String> {
@@ -168,7 +168,7 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Vec<Value> {
         match role(&m) {
             "assistant" => {
                 let vis = visible_key(&m);
-                let ov = if vis.is_empty() { None } else { st.engine.store.get_overlay(&expand_anchor(prev, &vis)) };
+                let ov = if vis.is_empty() { None } else { st.engine.store.get_overlay(&expand_anchor(session, prev, &vis), session) };
                 match ov {
                     Some((k, p)) if k == K_EXPAND && p["messages"].as_array().is_some_and(|a| !a.is_empty()) => out.extend(p["messages"].as_array().cloned().unwrap_or_default()),
                     _ => out.push(m),
@@ -176,7 +176,7 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Vec<Value> {
             }
             "user" => {
                 let mut m = m;
-                if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i])) {
+                if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i]), session) {
                     if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
                         append_text(&mut m, t);
                     }
@@ -304,7 +304,7 @@ fn finalize(st: &AppState, t: &Turn, mut rounds: Vec<RoundRec>) -> Value {
         messages.push(upstream_msg(&r.msg));
         messages.extend(r.results.iter().cloned());
     }
-    if let Err(e) = st.engine.store.put_overlay(&expand_anchor(prev, &vis), &t.ctx.session, K_EXPAND, &json!({"v": 1, "messages": messages})) {
+    if let Err(e) = st.engine.store.put_overlay(&expand_anchor(&t.ctx.session, prev, &vis), &t.ctx.session, K_EXPAND, &json!({"v": 1, "messages": messages})) {
         tracing::warn!("storing expansion overlay failed: {e}");
     }
     visible
@@ -356,7 +356,7 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     if let (Some(text), Some(last_key)) = (prompt.as_deref(), keys.last()) {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };
         let anchor = aug_anchor(&info.session, prev, last_key);
-        if st.engine.store.get_overlay(&anchor).is_none() {
+        if st.engine.store.get_overlay(&anchor, &info.session).is_none() {
             record_turn(&st, &ctx, "user", text);
             let aug = build_augmentation(&st, &ctx, text).await;
             if let (Some(a), Some(m)) = (aug.as_deref(), messages.last_mut()) {

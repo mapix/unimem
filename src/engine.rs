@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::config::Config;
 use crate::decide::{Answers, ChainDecider, Decider, Question, Questions};
 use crate::embed::Embedder;
-use crate::project::{mentioned_projects, scope_of, Resolved, Resolver};
+use crate::project::{mentioned_projects, names_project, scope_of, Resolved, Resolver};
 use crate::screen;
 use crate::store::{cosine, Edge, Memory, Project, Source, Store};
 use crate::util::{fmt_date, new_id, now_ts, tokenize, truncate_chars};
@@ -107,6 +107,16 @@ const CANDIDATE_K: usize = 8;
 const ANCHOR_K: usize = 30;
 const SCORE_K: usize = 14;
 const MAX_NODES: usize = 40;
+/// Paraphrase duplicate: Jaccard of the non-numeric content skeletons (stopwords removed), with equal numbers.
+const DUP_JACCARD: f64 = 0.7;
+/// Minimum evidence for a recall anchor to be scored at all.
+const MIN_ANCHOR_VSIM: f64 = 0.2;
+const MIN_ANCHOR_FTS_COVERAGE: f64 = 0.25;
+/// Sufficiency: a confident top note, or a fairly confident one that covers most of the query.
+const T_SUFFICIENT: f64 = 0.6;
+const T_SUFFICIENT_COVERED: f64 = 0.5;
+const SUFFICIENT_COVERAGE: f64 = 0.5;
+const MAX_WEAK: usize = 2;
 
 fn token_overlap(a: &str, b: &str) -> f64 {
     let ta: HashSet<String> = tokenize(a).into_iter().filter(|t| t.chars().count() > 2 || !t.is_ascii()).collect();
@@ -115,6 +125,18 @@ fn token_overlap(a: &str, b: &str) -> f64 {
         return 0.0;
     }
     ta.intersection(&tb).count() as f64 / ta.len().min(tb.len()) as f64
+}
+
+/// Fraction of the query's content tokens (stopwords removed) that appear in `text`.
+fn query_coverage(q: &str, text: &str) -> f64 {
+    let content = |s: &str| -> HashSet<String> {
+        tokenize(s).into_iter().filter(|t| !screen::is_stopword(t) && (t.chars().count() > 1 || !t.is_ascii())).collect()
+    };
+    let (tq, tn) = (content(q), content(text));
+    if tq.is_empty() {
+        return 0.0;
+    }
+    tq.intersection(&tn).count() as f64 / tq.len() as f64
 }
 
 impl Engine {
@@ -225,10 +247,15 @@ impl Engine {
         let kind_hint = req.kind.as_deref().filter(|k| screen::KINDS.iter().any(|(n, _)| n == k)).map(String::from);
         let pref_like = screen::is_preference_like(&full);
         let ents = screen::extract_entities(&full);
-        let scope_prior = if pref_like && ents.is_empty() || ctx.project.is_none() {
-            "global"
-        } else if options.iter().any(|o| o.0 == "other0") && !content.to_lowercase().contains(&ctx.project.as_ref().map(|r| r.project.name.to_lowercase()).unwrap_or_default()) {
+        // A preference about the user travels with the user, whatever tools it names, unless the note ties itself
+        // to the current project (by "this repo", by name, or by one of its paths).
+        let names_current = ctx.project.as_ref().is_some_and(|r| screen::mentions_this_project(&full) || names_project(&r.project, &full, &ents));
+        let about_user = screen::is_user_preference(&full) || pref_like && ents.is_empty();
+        let has_other = options.iter().any(|o| o.0 == "other0");
+        let scope_prior = if has_other && !names_current && !about_user {
             "other0"
+        } else if ctx.project.is_none() || about_user && !names_current {
+            "global"
         } else {
             "project"
         };
@@ -288,7 +315,9 @@ impl Engine {
         }
         cand_ids.truncate(CANDIDATE_K + 4);
         let cands = self.store.get_memories(&cand_ids);
-        let nums_new = screen::numbers(&full);
+        let nums_new = screen::value_numbers(&full);
+        let skel_new = screen::skeleton(&full);
+        let family_new = screen::kind_family(&kind);
 
         let mut rq: Questions = vec![];
         let mut cand_state = vec![];
@@ -300,13 +329,20 @@ impl Engine {
             let ctext = format!("{} {}", c.content, c.why.clone().unwrap_or_default());
             let overlap = token_overlap(&full, &ctext);
             let shared_ent = c.entities.iter().any(|e| ents.contains(e));
-            let nums_old = screen::numbers(&ctext);
-            let numbers_differ = !nums_new.is_empty() && !nums_old.is_empty() && nums_new != nums_old;
+            let nums_old = screen::value_numbers(&ctext);
+            let same_numbers = nums_new == nums_old;
+            let numbers_differ = !nums_new.is_empty() && !nums_old.is_empty() && !same_numbers;
             let k = format!("c{i}");
             cand_state.push(json!({"key": k, "note": c.content, "why": c.why, "date": fmt_date(c.created_at)}));
-            let p_dup = if sim > 0.9 || overlap > 0.9 && !numbers_differ { 0.85 } else { (overlap * 0.6).min(0.6) };
-            let p_sup = if (overlap > 0.5 || sim > 0.55) && (numbers_differ || screen::kind_prior(&full) == "decision" && overlap > 0.6) { 0.75 } else { 0.1 };
-            let p_cause = if (screen::has_because(&full) || screen::has_because(&ctext)) && (shared_ent || overlap > 0.3) { 0.62 } else { 0.12 };
+            let skel_j = screen::jaccard(&skel_new, &screen::skeleton(&ctext));
+            let p_dup = if same_numbers && (sim > 0.9 || overlap > 0.9 || skel_j >= DUP_JACCARD) { 0.85 } else { (overlap * 0.6).min(0.6) };
+            // Supersede = same subject, same kind family, a changed value (or a new decision on the same subject),
+            // and the old note is not the *reason* for the new one (that is a causal link, not an update).
+            let same_subject = screen::same_subject(&full, &ctext, shared_ent);
+            let old_is_reason = screen::presents_as_reason(&c.content) && !screen::presents_as_reason(&full);
+            let changed = numbers_differ || kind == "decision" && c.kind == "decision" && skel_j < DUP_JACCARD;
+            let p_sup = if same_subject && changed && family_new == screen::kind_family(&c.kind) && !old_is_reason { 0.75 } else { 0.1 };
+            let p_cause = if (screen::is_reason_note(&full) || screen::is_reason_note(&ctext)) && (shared_ent || overlap > 0.3) { 0.62 } else { 0.12 };
             let p_ent = if shared_ent { 0.8 } else { 0.15 };
             rq.push((format!("dup_{k}"), Question::noul(format!("Do the NEW note and note {k} state the same information (one adds nothing to the other)?"), p_dup)));
             rq.push((format!("sup_{k}"), Question::noul(format!("Is the NEW note a newer version of note {k}: the same subject with a changed value or decision, so {k} is now outdated?"), p_sup)));
@@ -422,7 +458,7 @@ impl Engine {
         if q.is_empty() {
             return Ok(out);
         }
-        if req.passive && (screen::is_ack(q) || q.chars().count() < 4) {
+        if req.passive && (screen::is_ack(q) || screen::info_units(q) < 4) {
             out.mode = "skipped".into();
             return Ok(out);
         }
@@ -462,18 +498,30 @@ impl Engine {
         };
 
         // ---- one batched System-One call: gate + relevance of top anchors + routing + sufficiency
-        let top: Vec<(String, f64)> = ranked.iter().take(SCORE_K).cloned().collect();
-        let mems: HashMap<String, Memory> = self.store.get_memories(&top.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
+        // Only anchors with real evidence are scored: a meaningful vector match, or a BM25 hit covering enough
+        // of the query (a single shared common word is not evidence).
+        let cand: Vec<(String, f64)> = ranked.iter().take(ANCHOR_K).cloned().collect();
+        let mut mems: HashMap<String, Memory> = self.store.get_memories(&cand.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
+        let note_text = |m: &Memory| format!("{} {} {}", m.content, m.why.clone().unwrap_or_default(), m.entities.join(" "));
+        let top: Vec<(String, f64)> = cand
+            .into_iter()
+            .filter(|(id, _)| {
+                let Some(m) = mems.get(id) else { return false };
+                let v = *vsim.get(id).unwrap_or(&0.0) as f64;
+                v >= MIN_ANCHOR_VSIM || fts_hit.contains(id) && query_coverage(&q_owned, &note_text(m)) >= MIN_ANCHOR_FTS_COVERAGE
+            })
+            .take(SCORE_K)
+            .collect();
+        mems.retain(|id, _| top.iter().any(|t| &t.0 == id));
         let mut qs: Questions = vec![];
         if req.passive {
-            let gate_prior = if q.chars().count() < 12 { 0.3 } else { 0.6 };
-            qs.push(("gate".into(), Question::noul("Would answering this message benefit from long-term memory about this user or project (past decisions, preferences, conventions, gotchas, history)?", gate_prior)));
+            qs.push(("gate".into(), Question::noul("Would answering this message benefit from long-term memory about this user or project (past decisions, preferences, conventions, gotchas, history)?", screen::gate_prior(q))));
         }
         let mut notes_state = vec![];
         for (i, (id, f)) in top.iter().enumerate() {
             if let Some(m) = mems.get(id) {
                 notes_state.push(json!({"key": format!("n{i}"), "note": m.content, "why": m.why, "date": fmt_date(m.created_at)}));
-                let text = format!("{} {} {}", m.content, m.why.clone().unwrap_or_default(), m.entities.join(" "));
+                let text = note_text(m);
                 qs.push((format!("rel_n{i}"), Question::noul(format!("Is note n{i} useful for answering the query?"), prior_for(id, *f, &text))));
             }
         }
@@ -555,7 +603,7 @@ impl Engine {
         let mut keep: Vec<(String, f64, String)> = scored.iter().filter(|s| s.1 >= T_RELEVANT).take(k).cloned().collect();
         // Agent-initiated recall: surface weak candidates instead of nothing (flagged insufficient below).
         if keep.is_empty() && !req.passive {
-            keep = scored.iter().filter(|s| s.1 >= T_RELEVANT * 0.65).take(2).cloned().collect();
+            keep = scored.iter().filter(|s| s.1 >= T_RELEVANT * 0.65).take(MAX_WEAK).cloned().collect();
         }
         let all = self.store.get_memories(&keep.iter().map(|x| x.0.clone()).collect::<Vec<_>>());
         let by_id: HashMap<String, Memory> = all.into_iter().map(|m| (m.id.clone(), m)).collect();
@@ -574,7 +622,10 @@ impl Engine {
                 });
             }
         }
-        out.sufficient = out.notes.first().is_some_and(|n| n.p >= 0.6);
+        out.sufficient = out.notes.first().is_some_and(|n| {
+            n.p >= T_RELEVANT
+                && (n.p >= T_SUFFICIENT || n.p >= T_SUFFICIENT_COVERED && query_coverage(q, &format!("{} {}", n.content, n.why.clone().unwrap_or_default())) >= SUFFICIENT_COVERAGE)
+        });
         self.store.touch_hits(&out.notes.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
         self.store.trace("recall", &json!({"q": truncate_chars(q, 200), "mode": out.mode, "by": out.decided_by, "n": out.notes.len(), "passive": req.passive, "harness": ctx.harness}));
         Ok(out)
