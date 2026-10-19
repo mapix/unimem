@@ -1,0 +1,48 @@
+[package]
+name = "uni-mem"
+version = "0.1.0"
+edition = "2021"
+description = "Harness-agnostic unified memory: a local LLM gateway that gives every coding agent one shared, project-aware long-term memory."
+license = "MIT"
+
+[[bin]]
+name = "unimem"
+path = "src/main.rs"
+
+[lib]
+name = "unimem"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["http1", "http2", "tokio", "json"] }
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+flate2 = "1"
+futures = "0.3"
+http = "1"
+parking_lot = "0.12"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "http2", "gzip", "brotli", "zstd"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ulid = "1"
+zstd = "0.13"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
