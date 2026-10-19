@@ -1,8 +1,11 @@
 //! unimem-bench: offline evaluation harness for uni-mem.
 //!
 //! ```text
-//! unimem-bench [all|e1|e2|e3|e4|summary]
+//! unimem-bench [all|e1|e2|e3|e4|summary] [--data <dataset.json>] [--out <results dir>]
 //! ```
+//!
+//! `--data` (default `bench/data/devmem.json`) is the E1 dataset; E2 always uses devmem.json (its scripted
+//! conversation is about the ledger-api project). `--out` defaults to `bench/results`.
 //!
 //! * E1 memory quality on the synthetic developer corpus `bench/data/devmem.json` (uni-mem vs baselines)
 //! * E2 gateway overhead + prompt-cache stability + interception correctness against a local mock Anthropic upstream
@@ -175,12 +178,12 @@ fn http_client() -> reqwest::Client {
     reqwest::Client::builder().no_proxy().pool_max_idle_per_host(16).build().unwrap()
 }
 
-/// Serve a router on an ephemeral port exactly as `unimem serve` does (no extra socket options).
+/// Serve a router on an ephemeral port exactly as `unimem serve` does (`gateway::serve`).
 async fn serve(r: Router) -> Result<String> {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = l.local_addr()?;
     tokio::spawn(async move {
-        let _ = axum::serve(l, r).await;
+        let _ = gateway::serve(l, r).await;
     });
     Ok(format!("http://{addr}"))
 }
@@ -225,6 +228,12 @@ struct DNote {
     reff: Option<String>,
     #[allow(dead_code)]
     explains: Option<String>,
+    /// Earlier note this one resembles but must NOT supersede (held-out set).
+    #[serde(default)]
+    not_supersedes: Option<String>,
+    /// Legit note that looks like something to reject ("secret" | "injection" | "status"); must be accepted.
+    #[serde(default)]
+    decoy: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -248,9 +257,8 @@ struct Dataset {
     queries: Vec<DQuery>,
 }
 
-fn load_ds(root: &Path) -> Result<Dataset> {
-    let p = root.join("bench/data/devmem.json");
-    serde_json::from_str(&std::fs::read_to_string(&p).with_context(|| p.display().to_string())?).context("parsing devmem.json")
+fn load_ds(p: &Path) -> Result<Dataset> {
+    serde_json::from_str(&std::fs::read_to_string(p).with_context(|| p.display().to_string())?).with_context(|| format!("parsing {}", p.display()))
 }
 
 struct Corpus {
@@ -554,9 +562,9 @@ fn baseline_visible(d: &BDoc, q: &DQuery, scoped: bool) -> bool {
     !scoped || d.at == q.at || d.at == "home"
 }
 
-async fn e1(root: &Path) -> Result<Value> {
+async fn e1(data: &Path) -> Result<Value> {
     let cfg = bench_config()?;
-    let ds = load_ds(root)?;
+    let ds = load_ds(data)?;
     let tmp = TempDir::new("e1")?;
     let corpus = Corpus::build(&tmp.0.join("ws"), &ds)?;
     let ev = Ev { ds: &ds, by_id: ds.notes.iter().map(|n| (n.id.as_str(), n)).collect() };
@@ -597,7 +605,8 @@ async fn e1(root: &Path) -> Result<Value> {
 
     // ---- per-harness silos
     let mut silos: HashMap<String, (Engine, HashMap<String, String>)> = HashMap::new();
-    for h in ["claude-code", "codex"] {
+    let harnesses: std::collections::BTreeSet<&str> = ds.notes.iter().map(|n| n.harness.as_str()).chain(ds.queries.iter().map(|q| q.harness.as_str())).collect();
+    for h in harnesses {
         let e = make_engine(&cfg, Store::open_memory()?);
         let notes: Vec<&DNote> = ds.notes.iter().filter(|n| n.harness == h).collect();
         let l = write_notes(&e, &corpus, &notes).await?;
@@ -656,7 +665,7 @@ async fn e1(root: &Path) -> Result<Value> {
     Ok(json!({
         "experiment": "E1 memory quality",
         "config": config_info(&cfg),
-        "dataset": {"projects": ds.projects.len(), "notes": ds.notes.len(), "queries": ds.queries.len(),
+        "dataset": {"path": data.display().to_string(), "projects": ds.projects.len(), "notes": ds.notes.len(), "queries": ds.queries.len(),
             "cross_harness_answerable": ds.queries.iter().filter(|q| !q.gold.is_empty() && ev.cross_harness(q)).count(),
             "same_harness_answerable": ds.queries.iter().filter(|q| !q.gold.is_empty() && !ev.cross_harness(q)).count()},
         "systems_description": {
@@ -700,9 +709,24 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
     let mut confusion: BTreeMap<String, u32> = BTreeMap::new();
     let mut kind_ok = 0;
     let mut scope_errors = vec![];
+    // held-out extras
+    let mut decoys: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut decoy_rejected = vec![];
+    let mut distractor_pairs: Vec<(String, String)> = vec![];
 
     for (nid, o) in &log.outs {
         let n = ev.by_id[nid.as_str()];
+        if let Some(d) = &n.decoy {
+            let e = decoys.entry(d.clone()).or_default();
+            e.1 += 1;
+            if let Out::Rejected { reason } = o {
+                e.0 += 1;
+                decoy_rejected.push(json!({"id": nid, "decoy": d, "content": n.content, "reason": reason}));
+            }
+        }
+        if let Some(x) = &n.not_supersedes {
+            distractor_pairs.push((nid.clone(), ev.canon(x)));
+        }
         let is_rej = n.label.starts_with("reject");
         let rejected = matches!(o, Out::Rejected { .. });
         if is_rej {
@@ -781,6 +805,21 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
         }
     }
     let _ = label;
+    // distractor pairs: did the distractor supersede its look-alike? was the look-alike superseded by anything
+    // that is not a gold superseding update of it?
+    let mut ds_pair_hits = vec![];
+    let mut ds_target_hits = vec![];
+    for (a, b) in &distractor_pairs {
+        if pred_pairs.contains(&(a.clone(), b.clone())) {
+            ds_pair_hits.push(json!({"new": a, "superseded": b}));
+        }
+        let by: Vec<&String> = pred_pairs.iter().filter(|(x, y)| y == b && !gold_pairs.contains(&(x.clone(), y.clone()))).map(|(x, _)| x).collect();
+        if !by.is_empty() {
+            ds_target_hits.push(json!({"target": b, "wrongly_superseded_by": by}));
+        }
+    }
+    let n_decoy: u32 = decoys.values().map(|v| v.1).sum();
+    let n_decoy_rej: u32 = decoys.values().map(|v| v.0).sum();
     let tp_pairs = pred_pairs.intersection(&gold_pairs).count() as f64;
     let wrong_pairs: Vec<Value> = pred_pairs.difference(&gold_pairs).map(|(a, b)| json!({"new": a, "superseded": b, "new_label": ev.by_id[a.as_str()].label})).collect();
     let div = |a: f64, b: f64| if b > 0.0 { json!(r3(a / b)) } else { Value::Null };
@@ -793,7 +832,12 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
             "dup_recall_correct_original": div(d_tp_strict as f64, n_dup_gold),
             "supersede_precision": div(tp_pairs, pred_pairs.len() as f64), "supersede_recall": div(tp_pairs, gold_pairs.len() as f64),
             "scope_accuracy": div(scope_ok as f64, scope_n as f64), "kind_accuracy": div(kind_ok as f64, scope_n as f64),
+            "decoy_false_reject_rate": div(n_decoy_rej as f64, n_decoy as f64),
+            "distractor_false_supersede_rate": div(ds_pair_hits.len() as f64, distractor_pairs.len() as f64),
+            "distractor_target_wrongly_superseded_rate": div(ds_target_hits.len() as f64, distractor_pairs.len() as f64),
         },
+        "decoys": {"n": n_decoy, "rejected": n_decoy_rej, "per_type_rejected": decoys.iter().map(|(k, v)| (k.clone(), json!(format!("{}/{}", v.0, v.1)))).collect::<serde_json::Map<_, _>>(), "rejected_notes": decoy_rejected},
+        "distractors": {"pairs": distractor_pairs.len(), "false_supersede_pairs": ds_pair_hits, "targets_wrongly_superseded": ds_target_hits},
         "rejection": {"tp": tp, "fp": fp, "fn": fnn, "per_type_recall": per_type.iter().map(|(k, v)| (k.clone(), json!(format!("{}/{}", v.0, v.1)))).collect::<serde_json::Map<_, _>>(), "false_rejects": false_rejects},
         "duplicates": {"gold": n_dup_gold_i, "detected": d_tp_loose, "detected_with_correct_original": d_tp_strict, "false_positive": d_fp, "supersede_swallowed_as_duplicate": sup_as_dup, "false_dups": false_dups},
         "supersede": {"gold_pairs": gold_pairs.len(), "predicted_pairs": pred_pairs.len(), "correct_pairs": tp_pairs as u64, "wrong_pairs": wrong_pairs, "lost_updates": lost_updates},
@@ -1124,7 +1168,8 @@ async fn gateway_env(cfg: &Config, ds: &Dataset, corpus: &Corpus, db: &Path, ups
     let engine = Arc::new(make_engine(&c, Store::open(db)?));
     let notes: Vec<&DNote> = ds.notes.iter().collect();
     write_notes(&engine, corpus, &notes).await?;
-    let state = Arc::new(AppState { engine: engine.clone(), client: http_client() });
+    // the upstream client `unimem serve` builds
+    let state = Arc::new(AppState { engine: engine.clone(), client: gateway::upstream_client(c.upstream.timeout_secs)? });
     let a = serve(gateway::router(state.clone())).await?;
     let b = serve_nodelay(gateway::router(state)).await?;
     Ok((a, b, engine))
@@ -1276,7 +1321,7 @@ async fn converse(
 
 async fn e2(root: &Path) -> Result<Value> {
     let cfg = bench_config()?;
-    let ds = load_ds(root)?;
+    let ds = load_ds(&root.join("bench/data/devmem.json"))?;
     let tmp = TempDir::new("e2")?;
     let corpus = Corpus::build(&tmp.0.join("ws"), &ds)?;
     let cwd = corpus.cwd("ledger-api");
@@ -1840,12 +1885,12 @@ fn pctf(v: &Value) -> String {
     }
 }
 
-fn summary(out: &Path) -> Result<()> {
+fn summary(out: &Path, data: &Path) -> Result<()> {
     let load = |n: &str| std::fs::read_to_string(out.join(n)).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok());
     let env = load("env.json").unwrap_or_else(env_info);
     let mut s = String::new();
     s.push_str("# uni-mem evaluation — results\n\n");
-    s.push_str("Generated by `cargo run --release --bin unimem-bench -- all`. Raw numbers: `bench/results/*.json`. Dataset: `bench/data/devmem.json` (generator: `bench/data/gen_devmem.py`).\n\n");
+    s.push_str(&format!("Generated by `cargo run --release --bin unimem-bench -- <exp> --data {} --out {}`. Raw numbers: `*.json` next to this file. E1 dataset: `{}`; E2 dataset: `bench/data/devmem.json`.\n\n", data.display(), out.display(), data.display()));
     s.push_str("## Environment\n\n| | |\n|---|---|\n");
     for k in ["cpus", "cpu_model", "arch", "ram_gb", "os", "kernel", "rustc", "git_commit", "profile"] {
         s.push_str(&format!("| {k} | {} |\n", f(&env[k])));
@@ -1909,12 +1954,15 @@ fn summary(out: &Path) -> Result<()> {
             ("duplicate precision", &sm["dup_precision"]), ("duplicate recall", &sm["dup_recall"]), ("duplicate recall (correct original)", &sm["dup_recall_correct_original"]),
             ("supersede precision (pairs)", &sm["supersede_precision"]), ("supersede recall (pairs)", &sm["supersede_recall"]),
             ("scope-assignment accuracy", &sm["scope_accuracy"]), ("kind accuracy", &sm["kind_accuracy"]),
+            ("decoy false-reject rate", &sm["decoy_false_reject_rate"]), ("distractor false-supersede rate (pairs)", &sm["distractor_false_supersede_rate"]),
+            ("distractor target wrongly superseded (by anything)", &sm["distractor_target_wrongly_superseded_rate"]),
         ] {
             s.push_str(&format!("| {k} | {} |\n", f(v)));
         }
         s.push_str(&format!("\nRejections per type: {}. False rejects: {}. Duplicates: {} gold, {} detected, {} false positives ({} of them were superseding updates swallowed as duplicates). Supersede pairs: {} gold, {} predicted, {} correct; lost updates (supersede notes not stored): {}.\n",
             w["rejection"]["per_type_recall"], w["rejection"]["fp"], f(&w["duplicates"]["gold"]), f(&w["duplicates"]["detected"]), f(&w["duplicates"]["false_positive"]), f(&w["duplicates"]["supersede_swallowed_as_duplicate"]),
             f(&w["supersede"]["gold_pairs"]), f(&w["supersede"]["predicted_pairs"]), f(&w["supersede"]["correct_pairs"]), w["supersede"]["lost_updates"].as_array().map(|a| a.len()).unwrap_or(0)));
+        s.push_str(&format!("\nDecoys rejected per type: {} (of {}). Distractor pairs: {}, false supersedes: {}.\n", w["decoys"]["per_type_rejected"], f(&w["decoys"]["n"]), f(&w["distractors"]["pairs"]), w["distractors"]["false_supersede_pairs"]));
         s.push_str("\nScope assignment by group:\n\n| group | correct / n | accuracy |\n|---|---|---|\n");
         if let Some(o) = w["scope"]["by_group"].as_object() {
             for (k, v) in o {
@@ -1987,9 +2035,16 @@ fn summary(out: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let what = std::env::args().nth(1).unwrap_or_else(|| "all".into());
     let root = bench_root();
-    let out = root.join("bench/results");
+    let (mut what, mut data, mut out) = (String::from("all"), root.join("bench/data/devmem.json"), root.join("bench/results"));
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--data" => data = PathBuf::from(args.next().context("--data needs a path")?),
+            "--out" => out = PathBuf::from(args.next().context("--out needs a dir")?),
+            _ => what = a,
+        }
+    }
     std::fs::create_dir_all(&out)?;
     let save = |name: &str, v: &Value| -> Result<()> {
         std::fs::write(out.join(name), serde_json::to_string_pretty(v)?)?;
@@ -2003,7 +2058,7 @@ async fn main() -> Result<()> {
         save("e3_project.json", &e3(&root).await?)?;
     }
     if run("e1") {
-        save("e1_memory.json", &e1(&root).await?)?;
+        save("e1_memory.json", &e1(&data).await?)?;
     }
     if run("e2") {
         save("e2_gateway.json", &e2(&root).await?)?;
@@ -2012,9 +2067,9 @@ async fn main() -> Result<()> {
         save("e4_throughput.json", &e4(&root).await?)?;
     }
     if !["all", "e1", "e2", "e3", "e4", "summary"].contains(&what.as_str()) {
-        bail!("usage: unimem-bench [all|e1|e2|e3|e4|summary]");
+        bail!("usage: unimem-bench [all|e1|e2|e3|e4|summary] [--data <dataset.json>] [--out <dir>]");
     }
-    summary(&out)?;
+    summary(&out, &data)?;
     println!("wrote {}", out.join("SUMMARY.md").display());
     Ok(())
 }
