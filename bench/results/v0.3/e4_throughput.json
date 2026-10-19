@@ -1,0 +1,79 @@
+{
+  "experiment": "E4 engine throughput",
+  "config": {
+    "decider": "heuristic",
+    "embedder": "hash2-512"
+  },
+  "outcomes": {
+    "duplicate": 183,
+    "stored": 6903,
+    "stored_superseding": 97
+  },
+  "tiers": [
+    {
+      "stored_notes": 1000,
+      "live_notes": 988,
+      "write_attempts": 1017,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 1.479,
+        "p95_ms": 8.257,
+        "mean_ms": 2.322,
+        "max_ms": 12.476
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 1.72,
+        "p95_ms": 3.526,
+        "mean_ms": 1.915,
+        "max_ms": 10.706
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 1.623,
+        "p95_ms": 3.494,
+        "mean_ms": 1.806,
+        "max_ms": 9.965
+      },
+      "notes_returned_per_recall": 3.52,
+      "db_bytes_with_wal": 13156072,
+      "db_bytes_after_checkpoint": 8962048,
+      "bytes_per_note": 8962,
+      "rss_mb": 23.578,
+      "elapsed_s": 3.091
+    },
+    {
+      "stored_notes": 7000,
+      "live_notes": 6897,
+      "write_attempts": 7183,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 5.296,
+        "p95_ms": 14.795,
+        "mean_ms": 6.541,
+        "max_ms": 18.677
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 3.582,
+        "p95_ms": 5.701,
+        "mean_ms": 3.905,
+        "max_ms": 15.48
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 3.179,
+        "p95_ms": 5.525,
+        "mean_ms": 3.558,
+        "max_ms": 15.404
+      },
+      "notes_returned_per_recall": 4.453,
+      "db_bytes_with_wal": 76268056,
+      "db_bytes_after_checkpoint": 71938048,
+      "bytes_per_note": 10276,
+      "rss_mb": 58.91,
+      "elapsed_s": 34.115
+    }
+  ],
+  "notes": "synthetic templated notes over 20 service families × 60 instances, 6 git projects + global; single-threaded sequential writes and recalls; exact (brute-force) vector search."
+}

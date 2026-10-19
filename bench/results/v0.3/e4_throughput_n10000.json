@@ -1,0 +1,79 @@
+{
+  "experiment": "E4 engine throughput",
+  "config": {
+    "decider": "heuristic",
+    "embedder": "hash2-512"
+  },
+  "outcomes": {
+    "duplicate": 325,
+    "stored": 9856,
+    "stored_superseding": 144
+  },
+  "tiers": [
+    {
+      "stored_notes": 1000,
+      "live_notes": 988,
+      "write_attempts": 1017,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 1.479,
+        "p95_ms": 8.12,
+        "mean_ms": 2.306,
+        "max_ms": 10.925
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 1.752,
+        "p95_ms": 3.508,
+        "mean_ms": 1.919,
+        "max_ms": 11.767
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 1.615,
+        "p95_ms": 3.491,
+        "mean_ms": 1.805,
+        "max_ms": 10.625
+      },
+      "notes_returned_per_recall": 3.52,
+      "db_bytes_with_wal": 13156072,
+      "db_bytes_after_checkpoint": 8962048,
+      "bytes_per_note": 8962,
+      "rss_mb": 23.59,
+      "elapsed_s": 3.081
+    },
+    {
+      "stored_notes": 10000,
+      "live_notes": 9849,
+      "write_attempts": 10325,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 7.654,
+        "p95_ms": 17.241,
+        "mean_ms": 8.763,
+        "max_ms": 23.606
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 4.751,
+        "p95_ms": 7.226,
+        "mean_ms": 5.145,
+        "max_ms": 18.712
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 4.204,
+        "p95_ms": 6.878,
+        "mean_ms": 4.621,
+        "max_ms": 19.261
+      },
+      "notes_returned_per_recall": 4.463,
+      "db_bytes_with_wal": 107904816,
+      "db_bytes_after_checkpoint": 103710720,
+      "bytes_per_note": 10371,
+      "rss_mb": 77.305,
+      "elapsed_s": 59.137
+    }
+  ],
+  "notes": "synthetic templated notes over 20 service families × 60 instances, 6 git projects + global; single-threaded sequential writes and recalls; exact (brute-force) vector search."
+}
