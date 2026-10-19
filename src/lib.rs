@@ -1,5 +1,6 @@
 pub mod config;
 pub mod decide;
+pub mod distill;
 pub mod embed;
 pub mod engine;
 pub mod gateway;
