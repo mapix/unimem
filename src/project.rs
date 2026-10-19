@@ -351,6 +351,28 @@ pub fn mentioned_projects(store: &Store, text: &str, exclude: Option<&str>) -> V
         .collect()
 }
 
+/// Projects referred to by a *short form* of a compound name: the leading part of `brine-pipeline` / `harbor_infra`
+/// ("brine", "harbor") used as a word. Weaker than a full-name mention, so callers use it only when no project is
+/// named in full; parts shorter than 4 characters are ignored.
+pub fn short_mentioned_projects(store: &Store, text: &str, exclude: Option<&str>) -> Vec<Project> {
+    let lower = text.to_lowercase();
+    store
+        .list_projects()
+        .into_iter()
+        .filter(|p| Some(p.pid.as_str()) != exclude)
+        .filter(|p| {
+            std::iter::once(&p.name).chain(p.aliases.iter()).any(|n| {
+                let n = n.to_lowercase();
+                let mut parts = n.split(['-', '_', ' ']).filter(|x| !x.is_empty());
+                match (parts.next(), parts.next()) {
+                    (Some(head), Some(_)) => head.chars().count() >= 4 && !head.starts_with('/') && contains_word(&lower, head),
+                    _ => false,
+                }
+            })
+        })
+        .collect()
+}
+
 /// Does `text` explicitly name `p`: its name or an alias as a word, its root path, or a relative path
 /// (from the extracted `entities`) that exists inside its root?
 pub fn names_project(p: &Project, text: &str, entities: &[String]) -> bool {

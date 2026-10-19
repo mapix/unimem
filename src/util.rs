@@ -27,8 +27,18 @@ pub fn hash_hex(parts: &[&str]) -> String {
     d[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Monotonic ULID-based id: ids sort in creation order even within one millisecond, so "newest" is well defined.
 pub fn new_id() -> String {
-    format!("m_{}", ulid::Ulid::new().to_string().to_lowercase())
+    static LAST: std::sync::Mutex<Option<ulid::Ulid>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let mut u = ulid::Ulid::new();
+    if let Some(l) = *last {
+        if u <= l {
+            u = l.increment().unwrap_or(u);
+        }
+    }
+    *last = Some(u);
+    format!("m_{}", u.to_string().to_lowercase())
 }
 
 fn is_cjk(c: char) -> bool {

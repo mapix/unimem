@@ -88,9 +88,63 @@ struct VecEntry {
     v: Vec<f32>,
 }
 
+/// In-RAM lexical index over live memories (BM25 with weighted query terms, see `lexicon`).
+#[derive(Default)]
+struct LexIndex {
+    /// doc id → (scope, term frequencies, length)
+    docs: HashMap<String, (String, HashMap<String, f32>, f32)>,
+    /// term → doc ids containing it
+    post: HashMap<String, Vec<String>>,
+    total_len: f64,
+}
+
+impl LexIndex {
+    fn add(&mut self, id: &str, scope: &str, text: &str) {
+        self.remove(id);
+        let mut tf: HashMap<String, f32> = HashMap::new();
+        let terms = crate::lexicon::index_terms(text);
+        for t in &terms {
+            *tf.entry(t.clone()).or_default() += 1.0;
+        }
+        let len = terms.len() as f32;
+        for t in tf.keys() {
+            self.post.entry(t.clone()).or_default().push(id.to_string());
+        }
+        self.total_len += len as f64;
+        self.docs.insert(id.to_string(), (scope.to_string(), tf, len));
+    }
+    fn remove(&mut self, id: &str) {
+        if let Some((_, tf, len)) = self.docs.remove(id) {
+            self.total_len -= len as f64;
+            for t in tf.keys() {
+                if let Some(v) = self.post.get_mut(t) {
+                    v.retain(|x| x != id);
+                    if v.is_empty() {
+                        self.post.remove(t);
+                    }
+                }
+            }
+        }
+    }
+    fn set_scope(&mut self, id: &str, scope: &str) {
+        if let Some(d) = self.docs.get_mut(id) {
+            d.0 = scope.to_string();
+        }
+    }
+}
+
+/// One lexical hit: BM25 score, and the idf-weighted share of the query that the note covers (0..1).
+#[derive(Debug, Clone)]
+pub struct LexHit {
+    pub id: String,
+    pub score: f64,
+    pub coverage: f64,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
     vecs: RwLock<HashMap<String, VecEntry>>,
+    lex: RwLock<LexIndex>,
 }
 
 const SCHEMA: &str = r#"
@@ -207,15 +261,16 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
-        let s = Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()) };
+        let s = Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()) };
         s.load_vectors()?;
+        s.load_lexical()?;
         Ok(s)
     }
 
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()) })
+        Ok(Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()) })
     }
 
     fn load_vectors(&self) -> Result<()> {
@@ -231,6 +286,21 @@ impl Store {
             m.insert(id, e);
         }
         Ok(())
+    }
+
+    fn load_lexical(&self) -> Result<()> {
+        let c = self.conn.lock();
+        let mut st = c.prepare(&format!("SELECT {MEM_COLS} FROM memories WHERE deleted=0 AND superseded_by IS NULL"))?;
+        let rows: Vec<Memory> = st.query_map([], row_to_memory)?.filter_map(|r| r.ok()).collect();
+        let mut lx = self.lex.write();
+        for m in rows {
+            lx.add(&m.id, &m.scope, &Self::lex_text(&m));
+        }
+        Ok(())
+    }
+
+    fn lex_text(m: &Memory) -> String {
+        format!("{} {} {}", m.content, m.why.clone().unwrap_or_default(), m.entities.join(" "))
     }
 
     // ---------- meta ----------
@@ -269,6 +339,9 @@ impl Store {
         c.execute("INSERT INTO mem_fts(id, tok) VALUES (?,?)", params![m.id, tok])?;
         drop(c);
         self.vecs.write().insert(m.id.clone(), VecEntry { scope: m.scope.clone(), live: m.superseded_by.is_none(), v: emb.to_vec() });
+        if m.superseded_by.is_none() {
+            self.lex.write().add(&m.id, &m.scope, &Self::lex_text(m));
+        }
         Ok(())
     }
 
@@ -311,6 +384,9 @@ impl Store {
         if let Some(e) = self.vecs.write().get_mut(id) {
             e.v = emb.to_vec();
         }
+        if m.superseded_by.is_none() {
+            self.lex.write().add(id, &m.scope, &Self::lex_text(&m));
+        }
         Ok(())
     }
 
@@ -319,6 +395,7 @@ impl Store {
         if let Some(e) = self.vecs.write().get_mut(id) {
             e.scope = scope.to_string();
         }
+        self.lex.write().set_scope(id, scope);
         Ok(())
     }
 
@@ -327,6 +404,7 @@ impl Store {
         if let Some(e) = self.vecs.write().get_mut(old) {
             e.live = false;
         }
+        self.lex.write().remove(old);
         Ok(())
     }
 
@@ -342,6 +420,7 @@ impl Store {
         c.execute("DELETE FROM edges WHERE src=? OR dst=?", [id, id])?;
         drop(c);
         self.vecs.write().remove(id);
+        self.lex.write().remove(id);
         Ok(n > 0)
     }
 
@@ -427,6 +506,67 @@ impl Store {
             .unwrap_or_default()
     }
 
+    /// BM25 (k1=1.2, b=0.75) over live memories in `scopes`, with weighted query terms from
+    /// `lexicon::query_terms` (exact tokens, stems, CJK unigrams, bilingual concepts). Each hit also carries the
+    /// idf-weighted fraction of the query it covers, a calibrated "how much of the question does it touch".
+    pub fn lex_search(&self, query: &str, scopes: &[String], k: usize) -> Vec<LexHit> {
+        let terms = crate::lexicon::query_terms(query);
+        let lx = self.lex.read();
+        let n = lx.docs.len() as f64;
+        if terms.is_empty() || n == 0.0 || scopes.is_empty() {
+            return vec![];
+        }
+        let avgdl = (lx.total_len / n).max(1.0);
+        let (k1, b) = (1.2, 0.75);
+        let idf = |t: &str| -> f64 {
+            let df = lx.post.get(t).map(|v| v.len()).unwrap_or(0) as f64;
+            (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
+        };
+        // Coverage: per query word (group), the best-matching variant's idf × weight, over the query's total mass.
+        let mut mass: HashMap<usize, f64> = HashMap::new();
+        for t in &terms {
+            if let Some(g) = t.group {
+                let m = mass.entry(g).or_default();
+                *m = m.max(t.weight * idf(&t.term));
+            }
+        }
+        let total: f64 = mass.values().sum();
+        let mut acc: HashMap<&str, (f64, HashMap<usize, f64>)> = HashMap::new();
+        for t in &terms {
+            let i = idf(&t.term);
+            let Some(ids) = lx.post.get(&t.term) else { continue };
+            for id in ids {
+                let (scope, tf, len) = &lx.docs[id];
+                if !scopes.iter().any(|s| s == scope) {
+                    continue;
+                }
+                let f = tf[&t.term] as f64;
+                let s = t.weight * i * f * (k1 + 1.0) / (f + k1 * (1.0 - b + b * *len as f64 / avgdl));
+                let e = acc.entry(id.as_str()).or_default();
+                e.0 += s;
+                if let Some(g) = t.group {
+                    let c = e.1.entry(g).or_default();
+                    *c = c.max(t.weight * i);
+                }
+            }
+        }
+        let mut v: Vec<LexHit> = acc
+            .into_iter()
+            .map(|(id, (s, c))| LexHit { id: id.to_string(), score: s, coverage: if total > 0.0 { (c.values().sum::<f64>() / total).min(1.0) } else { 0.0 } })
+            .collect();
+        v.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
+        v.truncate(k);
+        v
+    }
+
+    /// Inverse document frequency of an index term over live memories (BM25 form; unseen terms get the maximum).
+    pub fn idf(&self, term: &str) -> f64 {
+        let lx = self.lex.read();
+        let n = lx.docs.len() as f64;
+        let df = lx.post.get(term).map(|v| v.len()).unwrap_or(0) as f64;
+        (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
+    }
+
     /// Exact cosine search over live memories in the given scopes.
     pub fn vec_search(&self, q: &[f32], scopes: &[String], k: usize, include_superseded: bool) -> Vec<(String, f32)> {
         let m = self.vecs.read();
@@ -435,7 +575,7 @@ impl Store {
             .filter(|(_, e)| (include_superseded || e.live) && scopes.iter().any(|s| s == &e.scope))
             .map(|(id, e)| (id.clone(), cosine(q, &e.v)))
             .collect();
-        v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
         v.truncate(k);
         v
     }
@@ -460,7 +600,9 @@ impl Store {
 
     pub fn reload_vectors(&self) -> Result<()> {
         self.vecs.write().clear();
-        self.load_vectors()
+        self.load_vectors()?;
+        *self.lex.write() = LexIndex::default();
+        self.load_lexical()
     }
 
     // ---------- edges ----------

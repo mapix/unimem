@@ -1,4 +1,5 @@
-//! Embedders. `hash` is offline and dependency-free (signed feature hashing of tokens + char trigrams);
+//! Embedders. `hash` is offline and dependency-free (signed feature hashing of tokens, stems, bilingual concepts
+//! and char trigrams);
 //! `openai` calls any `/v1/embeddings` endpoint (OpenAI, Ollama, vLLM, TEI…).
 
 use anyhow::{anyhow, Result};
@@ -37,7 +38,15 @@ impl HashEmbedder {
             v[idx] += sign * w;
         };
         for t in &toks {
-            add(&format!("w:{t}"), 1.0);
+            // stopwords carry no topic; keep them faint so short questions are not dominated by "what is the"
+            let w = if crate::screen::is_stopword(t) || crate::screen::is_question_word(t) { 0.25 } else { 1.0 };
+            let st = crate::lexicon::stem(t);
+            if st != *t {
+                add(&format!("w:{st}"), 0.7 * w);
+                add(&format!("w:{t}"), 0.5 * w);
+            } else {
+                add(&format!("w:{t}"), w);
+            }
             // char trigrams give some robustness to inflection (deploy/deploys/deployment)
             let cs: Vec<char> = format!("^{t}$").chars().collect();
             if cs.len() > 4 {
@@ -48,6 +57,16 @@ impl HashEmbedder {
         }
         for w in toks.windows(2) {
             add(&format!("b:{} {}", w[0], w[1]), 0.5);
+        }
+        // parts of compound identifiers (SyncPeriod → sync, period)
+        for w in text.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+            for p in crate::lexicon::identifier_parts(w) {
+                add(&format!("w:{}", crate::lexicon::stem(&p)), 0.5);
+            }
+        }
+        // bilingual concepts: an English note and its Chinese restatement share these features
+        for c in crate::lexicon::concepts(text) {
+            add(&format!("w:{c}"), 0.8);
         }
         let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         if n > 0.0 {
@@ -60,7 +79,7 @@ impl HashEmbedder {
 #[async_trait]
 impl Embedder for HashEmbedder {
     fn id(&self) -> String {
-        format!("hash-{}", self.dim)
+        format!("hash2-{}", self.dim)
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         Ok(texts.iter().map(|t| self.embed_sync(t)).collect())

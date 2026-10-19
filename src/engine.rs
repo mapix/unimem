@@ -6,15 +6,15 @@
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::config::Config;
 use crate::decide::{Answers, ChainDecider, Decider, Question, Questions};
 use crate::embed::Embedder;
-use crate::project::{mentioned_projects, names_project, scope_of, Resolved, Resolver};
+use crate::project::{mentioned_projects, names_project, scope_of, short_mentioned_projects, Resolved, Resolver};
 use crate::screen;
 use crate::store::{cosine, Edge, Memory, Project, Source, Store};
-use crate::util::{fmt_date, new_id, now_ts, tokenize, truncate_chars};
+use crate::util::{fmt_date, new_id, now_ts, truncate_chars};
 
 /// Who is asking, from where.
 #[derive(Debug, Clone, Default)]
@@ -100,44 +100,56 @@ const T_DUP: f64 = 0.8;
 const T_SUPERSEDE: f64 = 0.7;
 const T_CAUSAL: f64 = 0.6;
 const T_ENTITY: f64 = 0.7;
-const T_RELEVANT: f64 = 0.45;
 const T_GATE: f64 = 0.35;
+/// Scope: a note written inside a project goes global when System One (or the prior) says it is about the user.
+const T_GLOBAL_PREF: f64 = 0.6;
+/// Near-identical embedding: duplicate without asking, unless the subjects differ.
 const NEAR_DUP_COS: f32 = 0.97;
-const CANDIDATE_K: usize = 8;
+const CANDIDATE_K: usize = 10;
 const ANCHOR_K: usize = 30;
 const SCORE_K: usize = 14;
 const MAX_NODES: usize = 40;
-/// Paraphrase duplicate: Jaccard of the non-numeric content skeletons (stopwords removed), with equal numbers.
-const DUP_JACCARD: f64 = 0.7;
-/// Minimum evidence for a recall anchor to be scored at all.
-const MIN_ANCHOR_VSIM: f64 = 0.2;
-const MIN_ANCHOR_FTS_COVERAGE: f64 = 0.25;
-/// Sufficiency: a confident top note, or a fairly confident one that covers most of the query.
-const T_SUFFICIENT: f64 = 0.6;
-const T_SUFFICIENT_COVERED: f64 = 0.5;
-const SUFFICIENT_COVERAGE: f64 = 0.5;
-const MAX_WEAK: usize = 2;
+/// Recall cut-off: a note is returned when its relevance is at least `T_RELEVANT` and within `KEEP_RATIO` of the
+/// best note (adaptive: a strong top hit raises the bar for the rest, a weak query keeps its few best).
+const T_RELEVANT: f64 = 0.12;
+const KEEP_RATIO: f64 = 0.4;
+/// Agent-initiated recall returns its best weak candidate instead of nothing when it is at least this relevant.
+const T_WEAK: f64 = 0.06;
+/// Sufficiency: the top note is likely the answer (calibrated probability), not merely related.
+const T_SUFFICIENT: f64 = 0.3;
 
-fn token_overlap(a: &str, b: &str) -> f64 {
-    let ta: HashSet<String> = tokenize(a).into_iter().filter(|t| t.chars().count() > 2 || !t.is_ascii()).collect();
-    let tb: HashSet<String> = tokenize(b).into_iter().filter(|t| t.chars().count() > 2 || !t.is_ascii()).collect();
-    if ta.is_empty() || tb.is_empty() {
-        return 0.0;
-    }
-    ta.intersection(&tb).count() as f64 / ta.len().min(tb.len()) as f64
+/// Code-side relevance evidence for one recall candidate. These are the features of the calibrated prior.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Evidence {
+    /// idf-weighted share of the query's words (and concepts) the note contains
+    pub coverage: f64,
+    /// BM25 relative to the best BM25 score of this query (0 when no lexical match)
+    pub lex_rel: f64,
+    /// cosine similarity of the embeddings
+    pub cos: f64,
+    /// cosine relative to the best cosine of this query
+    pub cos_rel: f64,
+    /// coverage relative to the best coverage among this query's candidates
+    pub cov_rel: f64,
+    /// the query asks for a reason and the note gives one
+    pub reason_match: bool,
 }
 
-/// Fraction of the query's content tokens (stopwords removed) that appear in `text`.
-fn query_coverage(q: &str, text: &str) -> f64 {
-    let content = |s: &str| -> HashSet<String> {
-        tokenize(s).into_iter().filter(|t| !screen::is_stopword(t) && (t.chars().count() > 1 || !t.is_ascii())).collect()
-    };
-    let (tq, tn) = (content(q), content(text));
-    if tq.is_empty() {
-        return 0.0;
-    }
-    tq.intersection(&tn).count() as f64 / tq.len() as f64
+/// Calibrated relevance prior: a logistic model of the evidence, P(note is useful for the query). The weights were
+/// fitted by logistic regression on development data (every feature is generic: lexical coverage and BM25, cosine,
+/// their values relative to the query's best candidate, and a reason/why match). Low absolute values are expected:
+/// most candidates of a query are not the answer. With a model-backed decider the same scale applies to its answer.
+pub fn relevance_prior(e: &Evidence) -> f64 {
+    let z = W_BIAS + W_COV * e.coverage + W_LEX * e.lex_rel + W_COS * e.cos + W_COS_REL * e.cos_rel + W_COV_REL * e.cov_rel + if e.reason_match { W_REASON } else { 0.0 };
+    1.0 / (1.0 + (-z).exp())
 }
+const W_BIAS: f64 = -5.1;
+const W_COV: f64 = 1.2;
+const W_LEX: f64 = 1.5;
+const W_COS: f64 = 0.25;
+const W_COS_REL: f64 = 0.6;
+const W_REASON: f64 = 1.0;
+const W_COV_REL: f64 = 1.7;
 
 impl Engine {
     pub fn new(cfg: Config, store: Store) -> Self {
@@ -245,16 +257,17 @@ impl Engine {
         };
 
         let kind_hint = req.kind.as_deref().filter(|k| screen::KINDS.iter().any(|(n, _)| n == k)).map(String::from);
-        let pref_like = screen::is_preference_like(&full);
         let ents = screen::extract_entities(&full);
-        // A preference about the user travels with the user, whatever tools it names, unless the note ties itself
-        // to the current project (by "this repo", by name, or by one of its paths).
+        // A statement about the user (a preference, a working rule addressed to the assistant, a personal fact)
+        // travels with the user, whatever tools it names, unless the note ties itself to the current project
+        // (by "this repo", by name, or by one of its paths).
         let names_current = ctx.project.as_ref().is_some_and(|r| screen::mentions_this_project(&full) || names_project(&r.project, &full, &ents));
-        let about_user = screen::is_user_preference(&full) || pref_like && ents.is_empty();
+        let p_user = if names_current { 0.1 } else { screen::global_pref_prior(&full) };
+        let about_user = p_user >= T_GLOBAL_PREF;
         let has_other = options.iter().any(|o| o.0 == "other0");
         let scope_prior = if has_other && !names_current && !about_user {
             "other0"
-        } else if ctx.project.is_none() || about_user && !names_current {
+        } else if ctx.project.is_none() || about_user {
             "global"
         } else {
             "project"
@@ -300,51 +313,67 @@ impl Engine {
             cand_scopes.push("global".into());
         }
         let vec_c = self.store.vec_search(&emb, &cand_scopes, CANDIDATE_K, false);
+        let idf = |t: &str| self.store.idf(t);
         if let Some((id, s)) = vec_c.first() {
             if *s >= NEAR_DUP_COS {
                 if let Some(m) = self.store.get_memory(id) {
-                    return Ok(WriteOutcome::Duplicate { of: m.id, content: m.content });
+                    let r = screen::relate(&full, &format!("{} {}", m.content, m.why.clone().unwrap_or_default()), &idf);
+                    if screen::dup_prior(&r, *s as f64) > T_DUP {
+                        return Ok(WriteOutcome::Duplicate { of: m.id, content: m.content });
+                    }
                 }
             }
         }
         let mut cand_ids: Vec<String> = vec_c.iter().map(|x| x.0.clone()).collect();
-        for (id, _) in self.store.fts_search(&full, &cand_scopes, CANDIDATE_K) {
-            if !cand_ids.contains(&id) {
-                cand_ids.push(id);
+        for h in self.store.lex_search(&full, &cand_scopes, CANDIDATE_K) {
+            if !cand_ids.contains(&h.id) {
+                cand_ids.push(h.id);
             }
         }
         cand_ids.truncate(CANDIDATE_K + 4);
         let cands = self.store.get_memories(&cand_ids);
-        let nums_new = screen::value_numbers(&full);
-        let skel_new = screen::skeleton(&full);
         let family_new = screen::kind_family(&kind);
 
         let mut rq: Questions = vec![];
         let mut cand_state = vec![];
         let mut sims = HashMap::new();
-        for (i, c) in cands.iter().enumerate() {
+        let mut sup_priors: Vec<f64> = vec![];
+        let mut rels: Vec<screen::Relation> = vec![];
+        for c in cands.iter() {
             let ce = self.store.embedding(&c.id).unwrap_or_default();
             let sim = cosine(&emb, &ce) as f64;
             sims.insert(c.id.clone(), sim);
             let ctext = format!("{} {}", c.content, c.why.clone().unwrap_or_default());
-            let overlap = token_overlap(&full, &ctext);
+            let r = screen::relate(&full, &ctext, &idf);
+            let mut p_sup = screen::supersede_prior(&full, &ctext, &r, sim);
+            // only a note of the same kind family and the same scope can be replaced
+            if family_new != screen::kind_family(&c.kind) && !(family_new == "state" || screen::kind_family(&c.kind) == "state") || c.scope != scope {
+                p_sup = p_sup.min(0.1);
+            }
+            sup_priors.push(p_sup);
+            rels.push(r);
+        }
+        // Among several supersede candidates, only the closest subject(s) are replaced.
+        let best_c = cands.iter().enumerate().filter(|(i, _)| sup_priors[*i] > T_SUPERSEDE).map(|(i, _)| rels[i].c).fold(0.0, f64::max);
+        // the closest candidate overall (subject overlap + similarity): the one a separate reason note explains
+        let closeness = |i: usize| rels[i].c + sims[&cands[i].id].max(0.0);
+        let closest = (0..cands.len()).max_by(|a, b| closeness(*a).partial_cmp(&closeness(*b)).unwrap_or(std::cmp::Ordering::Equal));
+        for (i, c) in cands.iter().enumerate() {
+            let sim = sims[&c.id];
+            let ctext = format!("{} {}", c.content, c.why.clone().unwrap_or_default());
+            let r = &rels[i];
             let shared_ent = c.entities.iter().any(|e| ents.contains(e));
-            let nums_old = screen::value_numbers(&ctext);
-            let same_numbers = nums_new == nums_old;
-            let numbers_differ = !nums_new.is_empty() && !nums_old.is_empty() && !same_numbers;
             let k = format!("c{i}");
             cand_state.push(json!({"key": k, "note": c.content, "why": c.why, "date": fmt_date(c.created_at)}));
-            let skel_j = screen::jaccard(&skel_new, &screen::skeleton(&ctext));
-            let p_dup = if same_numbers && (sim > 0.9 || overlap > 0.9 || skel_j >= DUP_JACCARD) { 0.85 } else { (overlap * 0.6).min(0.6) };
-            // Supersede = same subject, same kind family, a changed value (or a new decision on the same subject),
-            // and the old note is not the *reason* for the new one (that is a causal link, not an update).
-            let same_subject = screen::same_subject(&full, &ctext, shared_ent);
-            let old_is_reason = screen::presents_as_reason(&c.content) && !screen::presents_as_reason(&full);
-            let changed = numbers_differ || kind == "decision" && c.kind == "decision" && skel_j < DUP_JACCARD;
-            let p_sup = if same_subject && changed && family_new == screen::kind_family(&c.kind) && !old_is_reason { 0.75 } else { 0.1 };
-            let p_cause = if (screen::is_reason_note(&full) || screen::is_reason_note(&ctext)) && (shared_ent || overlap > 0.3) { 0.62 } else { 0.12 };
-            let p_ent = if shared_ent { 0.8 } else { 0.15 };
-            rq.push((format!("dup_{k}"), Question::noul(format!("Do the NEW note and note {k} state the same information (one adds nothing to the other)?"), p_dup)));
+            let p_dup = screen::dup_prior(r, sim);
+            tracing::trace!(target: "unimem::evidence", new = content.as_str(), old = c.id.as_str(), relation = ?r, p_dup, p_sup = sup_priors[i]);
+            let mut p_sup = sup_priors[i];
+            if p_sup > T_SUPERSEDE && r.c < 0.8 * best_c {
+                p_sup = 0.4;
+            }
+            let p_cause = screen::causal_prior(&full, &ctext, r, shared_ent, sim, closest == Some(i));
+            let p_ent = if shared_ent || r.c >= 0.5 { 0.8 } else { 0.15 };
+            rq.push((format!("dup_{k}"), Question::noul(format!("Do the NEW note and note {k} state the same information about the same subject (one adds nothing to the other)?"), p_dup)));
             rq.push((format!("sup_{k}"), Question::noul(format!("Is the NEW note a newer version of note {k}: the same subject with a changed value or decision, so {k} is now outdated?"), p_sup)));
             rq.push((format!("cause_{k}"), Question::noul(format!("Does one of the NEW note and note {k} explain why the other is true (a cause or reason link)?"), p_cause)));
             rq.push((format!("ent_{k}"), Question::noul(format!("Are the NEW note and note {k} about the same specific thing (file, service, command, tool, person)?"), p_ent)));
@@ -441,7 +470,11 @@ impl Engine {
         if let Some(p) = extra.and_then(|n| self.find_project(n)) {
             scopes.push(scope_of(&p.pid));
         }
-        for p in mentioned_projects(&self.store, query, ctx.pid()).into_iter().take(2) {
+        let mut named = mentioned_projects(&self.store, query, ctx.pid());
+        if named.is_empty() {
+            named = short_mentioned_projects(&self.store, query, ctx.pid());
+        }
+        for p in named.into_iter().take(2) {
             let s = scope_of(&p.pid);
             if !scopes.contains(&s) {
                 scopes.push(s);
@@ -463,71 +496,74 @@ impl Engine {
             return Ok(out);
         }
 
-        // ---- anchors: BM25 + vector, fused with RRF
+        // ---- anchors: lexical (BM25 over stems / CJK unigrams / bilingual concepts) + vector
         let qemb = self.embedder.embed_one(q).await?;
-        let fts = self.store.fts_search(q, &scopes, ANCHOR_K);
+        let lex = self.store.lex_search(q, &scopes, ANCHOR_K);
         let vs = self.store.vec_search(&qemb, &scopes, ANCHOR_K, false);
-        let mut fused: BTreeMap<String, f64> = BTreeMap::new();
-        let mut fts_hit: HashSet<String> = HashSet::new();
-        for (r, (id, _)) in fts.iter().enumerate() {
-            *fused.entry(id.clone()).or_default() += 1.0 / (60.0 + r as f64);
-            fts_hit.insert(id.clone());
-        }
-        let vsim: HashMap<String, f32> = vs.iter().cloned().collect();
-        for (r, (id, _)) in vs.iter().enumerate() {
-            *fused.entry(id.clone()).or_default() += 1.0 / (60.0 + r as f64);
-        }
-        if fused.is_empty() {
+        if lex.is_empty() && vs.is_empty() {
             out.mode = "empty".into();
             out.needed = true;
             return Ok(out);
         }
-        let mut ranked: Vec<(String, f64)> = fused.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        let max_f = ranked[0].1;
+        let max_lex = lex.first().map(|h| h.score).unwrap_or(0.0).max(1e-9);
+        let max_cos = vs.first().map(|x| x.1 as f64).unwrap_or(0.0).max(1e-9);
+        let wants_reason = screen::asks_why(q);
+        let mut ev: HashMap<String, Evidence> = HashMap::new();
+        for h in &lex {
+            let e = ev.entry(h.id.clone()).or_default();
+            e.coverage = h.coverage;
+            e.lex_rel = h.score / max_lex;
+        }
+        for (id, c) in &vs {
+            let e = ev.entry(id.clone()).or_default();
+            e.cos = (*c as f64).max(0.0);
+            e.cos_rel = e.cos / max_cos;
+        }
+        let ids: Vec<String> = ev.keys().cloned().collect();
+        let mut mems: HashMap<String, Memory> = self.store.get_memories(&ids).into_iter().map(|m| (m.id.clone(), m)).collect();
+        let max_cov = ev.values().map(|e| e.coverage).fold(0.0, f64::max).max(1e-9);
+        let mut prior: Vec<(String, f64)> = vec![];
+        for (id, e) in ev.iter_mut() {
+            e.cov_rel = e.coverage / max_cov;
+            let Some(m) = mems.get(id) else { continue };
+            if e.cos == 0.0 {
+                e.cos = cosine(&qemb, &self.store.embedding(id).unwrap_or_default()).max(0.0) as f64;
+                e.cos_rel = e.cos / max_cos;
+            }
+            e.reason_match = wants_reason && (screen::explains(&m.content) || screen::is_reason_note(&m.content) || m.why.is_some());
+            prior.push((id.clone(), relevance_prior(e)));
+        }
+        prior.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then_with(|| a.0.cmp(&b.0)));
+        for (id, p) in prior.iter().take(20) {
+            tracing::trace!(target: "unimem::evidence", query = q, id = id.as_str(), prior = *p, evidence = ?ev[id]);
+        }
         let multihop = screen::looks_multihop(q);
         out.mode = if multihop { "full".into() } else { "lite".into() };
 
-        // Heuristic relevance prior: vector similarity, lexical coverage of the query, BM25 hit, fused rank.
-        let q_owned = q.to_string();
-        let prior_for = |id: &str, f: f64, text: &str| -> f64 {
-            let v = *vsim.get(id).unwrap_or(&0.0) as f64;
-            let ft = if fts_hit.contains(id) { 0.1 } else { 0.0 };
-            let cov = token_overlap(&q_owned, text);
-            (0.1 + 0.8 * (v - 0.1).clamp(0.0, 0.6) + 0.35 * cov + ft + 0.1 * (f / max_f)).clamp(0.0, 0.95)
-        };
-
-        // ---- one batched System-One call: gate + relevance of top anchors + routing + sufficiency
-        // Only anchors with real evidence are scored: a meaningful vector match, or a BM25 hit covering enough
-        // of the query (a single shared common word is not evidence).
-        let cand: Vec<(String, f64)> = ranked.iter().take(ANCHOR_K).cloned().collect();
-        let mut mems: HashMap<String, Memory> = self.store.get_memories(&cand.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
-        let note_text = |m: &Memory| format!("{} {} {}", m.content, m.why.clone().unwrap_or_default(), m.entities.join(" "));
-        let top: Vec<(String, f64)> = cand
-            .into_iter()
-            .filter(|(id, _)| {
-                let Some(m) = mems.get(id) else { return false };
-                let v = *vsim.get(id).unwrap_or(&0.0) as f64;
-                v >= MIN_ANCHOR_VSIM || fts_hit.contains(id) && query_coverage(&q_owned, &note_text(m)) >= MIN_ANCHOR_FTS_COVERAGE
-            })
-            .take(SCORE_K)
-            .collect();
+        // ---- one batched System-One call: gate + relevance of the top candidates + routing
+        let top: Vec<(String, f64)> = prior.into_iter().take(SCORE_K).collect();
         mems.retain(|id, _| top.iter().any(|t| &t.0 == id));
         let mut qs: Questions = vec![];
         if req.passive {
             qs.push(("gate".into(), Question::noul("Would answering this message benefit from long-term memory about this user or project (past decisions, preferences, conventions, gotchas, history)?", screen::gate_prior(q))));
         }
         let mut notes_state = vec![];
-        for (i, (id, f)) in top.iter().enumerate() {
+        for (i, (id, p)) in top.iter().enumerate() {
             if let Some(m) = mems.get(id) {
                 notes_state.push(json!({"key": format!("n{i}"), "note": m.content, "why": m.why, "date": fmt_date(m.created_at)}));
-                let text = note_text(m);
-                qs.push((format!("rel_n{i}"), Question::noul(format!("Is note n{i} useful for answering the query?"), prior_for(id, *f, &text))));
+                qs.push((format!("rel_n{i}"), Question::noul(format!("Is note n{i} useful for answering the query?"), *p)));
             }
         }
+        // Sufficiency prior: the calibrated probability that the best candidate answers the query, rescaled so
+        // that 0.5 sits at `T_SUFFICIENT`. A model-backed decider answers the question from the notes themselves.
+        let p_top = top.first().map(|t| t.1).unwrap_or(0.0);
+        let suff_prior = (0.5 * p_top / T_SUFFICIENT).min(0.95);
+        if !top.is_empty() {
+            qs.push(("sufficient".into(), Question::noul("Do these notes, taken together, contain the answer to the query (not just related information)?", suff_prior)));
+        }
         if multihop {
-            qs.push(("view_causal".into(), Question::noul("Does answering need the reasons or causes behind facts (why something is the way it is)?", if q.to_lowercase().contains("why") || q.contains("为什么") || q.contains("为啥") { 0.85 } else { 0.3 })));
-            qs.push(("view_temporal".into(), Question::noul("Does answering need history or the order in which things changed?", if screen::looks_multihop(q) { 0.6 } else { 0.2 })));
+            qs.push(("view_causal".into(), Question::noul("Does answering need the reasons or causes behind facts (why something is the way it is)?", if wants_reason { 0.85 } else { 0.3 })));
+            qs.push(("view_temporal".into(), Question::noul("Does answering need history or the order in which things changed?", if screen::asks_history(q) { 0.6 } else { 0.2 })));
         }
         let state = json!({"query": q, "notes": notes_state});
         let (a, by) = self.ask(&state, &qs).await;
@@ -545,37 +581,61 @@ impl Engine {
             }
         }
 
-        // ---- graph expansion (full mode)
-        if out.mode == "full" {
-            let mut rels: Vec<&str> = vec!["semantic", "entity"];
-            if a.get("view_causal").is_some_and(|x| x.p > 0.5) {
+        // ---- graph expansion (full mode): the reasons behind, and the history of, the confident anchors.
+        // Semantic / entity neighbours are not expanded: the anchor retrieval already covers them, and adding
+        // them only dilutes precision. A reason note is pulled in through a causal edge from the *fact* it
+        // explains; history (temporal / supersedes edges) only when the query asks about change over time.
+        let causal = a.get("view_causal").is_some_and(|x| x.p > 0.5);
+        let temporal = a.get("view_temporal").is_some_and(|x| x.p > 0.5);
+        if out.mode == "full" && (causal || temporal) {
+            let mut rels: Vec<&str> = vec![];
+            if causal {
                 rels.push("causal");
             }
-            let temporal = a.get("view_temporal").is_some_and(|x| x.p > 0.5);
             if temporal {
-                rels.push("temporal");
                 rels.push("supersedes");
             }
+            let best = scored.iter().map(|s| s.1).fold(0.0, f64::max);
             let seen: HashSet<String> = scored.iter().map(|s| s.0.clone()).collect();
             let mut frontier: Vec<(String, f64, String)> = vec![];
-            let mut seeds: Vec<&(String, f64, String)> = scored.iter().filter(|s| s.1 > T_RELEVANT * 0.8).collect();
+            let mut boosts: Vec<(String, f64)> = vec![];
+            let mut seeds: Vec<&(String, f64, String)> = scored.iter().filter(|s| s.1 >= T_RELEVANT && s.1 >= best * KEEP_RATIO).collect();
             seeds.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            for s in seeds.into_iter().take(8) {
+            for s in seeds.into_iter().take(3) {
+                let seed_is_reason = mems.get(&s.0).is_some_and(|m| screen::explains(&m.content) || screen::is_reason_note(&m.content));
                 for e in self.store.neighbors(&s.0, &rels) {
-                    let other = if e.src == s.0 { e.dst.clone() } else { e.src.clone() };
-                    if seen.contains(&other) || frontier.iter().any(|f| f.0 == other) {
+                    if e.rel == "causal" && seed_is_reason {
                         continue;
                     }
-                    let w = if e.rel == "causal" { 0.95 } else { e.weight.min(1.0) * 0.85 };
+                    let other = if e.src == s.0 { e.dst.clone() } else { e.src.clone() };
+                    let w = if e.rel == "causal" { 0.9 } else { 0.6 };
+                    if seen.contains(&other) {
+                        // already a candidate: a causal edge from a confident fact lifts its reason note
+                        if e.rel == "causal" {
+                            boosts.push((other, s.1 * w));
+                        }
+                        continue;
+                    }
+                    if frontier.iter().any(|f| f.0 == other) {
+                        continue;
+                    }
                     frontier.push((other, s.1 * w, e.rel.clone()));
                     if frontier.len() >= MAX_NODES {
                         break;
                     }
                 }
             }
+            for (id, p) in boosts {
+                if let Some(x) = scored.iter_mut().find(|x| x.0 == id) {
+                    if p > x.1 {
+                        x.1 = p;
+                        x.2 = "causal".into();
+                    }
+                }
+            }
             if !frontier.is_empty() {
                 let fm: HashMap<String, Memory> = self.store.get_memories(&frontier.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
-                let frontier: Vec<_> = frontier.into_iter().filter(|f| fm.get(&f.0).is_some_and(|m| m.superseded_by.is_none() || temporal) && scopes.contains(&fm[&f.0].scope)).take(SCORE_K).collect();
+                let frontier: Vec<_> = frontier.into_iter().filter(|f| fm.get(&f.0).is_some_and(|m| (m.superseded_by.is_none() || temporal) && scopes.contains(&m.scope))).take(SCORE_K).collect();
                 let mut eq: Questions = vec![];
                 let mut es = vec![];
                 for (i, (id, p, _)) in frontier.iter().enumerate() {
@@ -592,23 +652,56 @@ impl Engine {
             }
         }
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        // De-prioritize superseded notes reached through history edges.
+        // ---- stale-value safety net: prefer the newest statement of a subject
+        let all: HashMap<String, Memory> = self.store.get_memories(&scored.iter().map(|x| x.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
+        let mut stale: HashSet<String> = HashSet::new();
         for s in scored.iter_mut() {
-            if self.store.get_memory(&s.0).is_some_and(|m| m.superseded_by.is_some()) {
+            if all.get(&s.0).is_some_and(|m| m.superseded_by.is_some()) {
                 s.1 *= 0.6;
+                stale.insert(s.0.clone());
             }
         }
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        let mut keep: Vec<(String, f64, String)> = scored.iter().filter(|s| s.1 >= T_RELEVANT).take(k).cloned().collect();
-        // Agent-initiated recall: surface weak candidates instead of nothing (flagged insufficient below).
-        if keep.is_empty() && !req.passive {
-            keep = scored.iter().filter(|s| s.1 >= T_RELEVANT * 0.65).take(MAX_WEAK).cloned().collect();
+        // Among candidates on the same subject (subject terms nearly identical, values differ), the older ones are
+        // outdated even if the write path missed the supersede: keep the newest, demote and flag the others.
+        let idf = |t: &str| self.store.idf(t);
+        let ids_sorted: Vec<String> = {
+            // only candidates that could be returned matter (bounded: pairwise comparison)
+            let mut v: Vec<&Memory> = scored.iter().filter(|s| s.1 >= T_WEAK).take(10).filter_map(|s| all.get(&s.0)).filter(|m| m.superseded_by.is_none()).collect();
+            v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+            v.into_iter().map(|m| m.id.clone()).collect()
+        };
+        for (i, newer) in ids_sorted.iter().enumerate() {
+            if stale.contains(newer) {
+                continue;
+            }
+            let mn = &all[newer];
+            for older in ids_sorted.iter().skip(i + 1) {
+                let mo = &all[older];
+                if stale.contains(older) || mo.scope != mn.scope {
+                    continue;
+                }
+                let r = screen::relate(&mn.content, &mo.content, &idf);
+                let cos = cosine(&self.store.embedding(newer).unwrap_or_default(), &self.store.embedding(older).unwrap_or_default()) as f64;
+                // both answer the same query: a weaker version of the write-time supersede test is enough here
+                let update = screen::announces_change(&mn.content) && !screen::explains(&mn.content) && !r.different_named_subject && !r.name_substitution && r.c >= 0.35 && r.c + cos >= 0.6;
+                if screen::same_slot(&r) || update && screen::dup_prior(&r, cos) < T_DUP {
+                    stale.insert(older.clone());
+                    if let Some(s) = scored.iter_mut().find(|s| &s.0 == older) {
+                        s.1 *= 0.6;
+                    }
+                }
+            }
         }
-        let all = self.store.get_memories(&keep.iter().map(|x| x.0.clone()).collect::<Vec<_>>());
-        let by_id: HashMap<String, Memory> = all.into_iter().map(|m| (m.id.clone(), m)).collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then_with(|| a.0.cmp(&b.0)));
+        let best = scored.first().map(|s| s.1).unwrap_or(0.0);
+        let mut keep: Vec<(String, f64, String)> = scored.iter().filter(|s| s.1 >= T_RELEVANT && s.1 >= best * KEEP_RATIO).take(k).cloned().collect();
+        // Agent-initiated recall: surface the best weak candidate instead of nothing (flagged insufficient below).
+        if keep.is_empty() && !req.passive {
+            keep = scored.iter().filter(|s| s.1 >= T_WEAK).take(1).cloned().collect();
+        }
         for (id, p, via) in &keep {
-            if let Some(m) = by_id.get(id) {
+            if let Some(m) = all.get(id) {
                 out.notes.push(Hit {
                     id: m.id.clone(),
                     scope: m.scope.clone(),
@@ -618,14 +711,11 @@ impl Engine {
                     date: fmt_date(m.created_at),
                     p: (*p * 100.0).round() / 100.0,
                     via: via.clone(),
-                    superseded: m.superseded_by.is_some(),
+                    superseded: m.superseded_by.is_some() || stale.contains(id),
                 });
             }
         }
-        out.sufficient = out.notes.first().is_some_and(|n| {
-            n.p >= T_RELEVANT
-                && (n.p >= T_SUFFICIENT || n.p >= T_SUFFICIENT_COVERED && query_coverage(q, &format!("{} {}", n.content, n.why.clone().unwrap_or_default())) >= SUFFICIENT_COVERAGE)
-        });
+        out.sufficient = a.get("sufficient").is_some_and(|x| x.p >= 0.5) && out.notes.first().is_some_and(|n| n.p >= T_RELEVANT && !n.superseded);
         self.store.touch_hits(&out.notes.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
         self.store.trace("recall", &json!({"q": truncate_chars(q, 200), "mode": out.mode, "by": out.decided_by, "n": out.notes.len(), "passive": req.passive, "harness": ctx.harness}));
         Ok(out)
