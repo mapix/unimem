@@ -1,0 +1,79 @@
+{
+  "experiment": "E4 engine throughput",
+  "config": {
+    "decider": "heuristic",
+    "embedder": "hash-512"
+  },
+  "outcomes": {
+    "duplicate": 672,
+    "stored": 768,
+    "stored_superseding": 9232
+  },
+  "tiers": [
+    {
+      "stored_notes": 1000,
+      "live_notes": 179,
+      "write_attempts": 1024,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 0.843,
+        "p95_ms": 1.163,
+        "mean_ms": 0.989,
+        "max_ms": 7.046
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 0.834,
+        "p95_ms": 1.299,
+        "mean_ms": 0.908,
+        "max_ms": 8.071
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 0.812,
+        "p95_ms": 1.282,
+        "mean_ms": 0.915,
+        "max_ms": 7.584
+      },
+      "notes_returned_per_recall": 3.843,
+      "db_bytes_with_wal": 9789040,
+      "db_bytes_after_checkpoint": 5619712,
+      "bytes_per_note": 5619,
+      "rss_mb": 47.332,
+      "elapsed_s": 1.401
+    },
+    {
+      "stored_notes": 10000,
+      "live_notes": 512,
+      "write_attempts": 10672,
+      "write_latency_last_500": {
+        "n": 500,
+        "p50_ms": 11.614,
+        "p95_ms": 15.944,
+        "mean_ms": 11.247,
+        "max_ms": 22.208
+      },
+      "recall_latency": {
+        "n": 300,
+        "p50_ms": 8.845,
+        "p95_ms": 11.743,
+        "mean_ms": 7.741,
+        "max_ms": 19.973
+      },
+      "recall_passive_latency": {
+        "n": 300,
+        "p50_ms": 8.683,
+        "p95_ms": 11.9,
+        "mean_ms": 7.558,
+        "max_ms": 20.996
+      },
+      "notes_returned_per_recall": 4.243,
+      "db_bytes_with_wal": 58847480,
+      "db_bytes_after_checkpoint": 54562816,
+      "bytes_per_note": 5456,
+      "rss_mb": 64.957,
+      "elapsed_s": 68.915
+    }
+  ],
+  "notes": "synthetic templated notes over 20 service families × 60 instances, 6 git projects + global; single-threaded sequential writes and recalls; exact (brute-force) vector search."
+}

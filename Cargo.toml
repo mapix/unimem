@@ -9,6 +9,10 @@ license = "MIT"
 name = "unimem"
 path = "src/main.rs"
 
+[[bin]]
+name = "unimem-bench"
+path = "src/bin/unimem-bench.rs"
+
 [lib]
 name = "unimem"
 path = "src/lib.rs"

@@ -1,0 +1,365 @@
+{
+  "experiment": "E2 gateway overhead & correctness",
+  "config": {
+    "decider": "heuristic",
+    "embedder": "hash-512"
+  },
+  "setup": {
+    "requests_per_cell": 300,
+    "warmup": 20,
+    "request_body_bytes": {
+      "stream": 31531,
+      "json": 31532
+    },
+    "history_messages": "0-10 (cycled)",
+    "memory_notes_loaded": 183,
+    "notes": "mock upstream (TCP_NODELAY) on 127.0.0.1 answers instantly (no model latency), so differences are pure gateway cost; sessions rotate every 10 requests (preamble once per session); every request is a new prompt (passive recall runs each time)."
+  },
+  "latency": {
+    "direct/json": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 0.257,
+        "p95_ms": 0.335,
+        "mean_ms": 0.265,
+        "max_ms": 0.724
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 0.257,
+        "p95_ms": 0.336,
+        "mean_ms": 0.266,
+        "max_ms": 0.725
+      }
+    },
+    "direct/stream": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 0.328,
+        "p95_ms": 0.417,
+        "mean_ms": 0.333,
+        "max_ms": 0.575
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 1.295,
+        "p95_ms": 1.503,
+        "mean_ms": 1.292,
+        "max_ms": 2.106
+      }
+    },
+    "gateway-nodelay/json": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 0.743,
+        "p95_ms": 0.971,
+        "mean_ms": 0.756,
+        "max_ms": 1.294
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 0.745,
+        "p95_ms": 0.972,
+        "mean_ms": 0.757,
+        "max_ms": 1.295
+      }
+    },
+    "gateway-nodelay/stream": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 2.375,
+        "p95_ms": 3.821,
+        "mean_ms": 2.509,
+        "max_ms": 11.461
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 3.345,
+        "p95_ms": 5.086,
+        "mean_ms": 3.535,
+        "max_ms": 12.275
+      }
+    },
+    "gateway-norecall/json": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 0.76,
+        "p95_ms": 0.913,
+        "mean_ms": 0.769,
+        "max_ms": 2.489
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 0.761,
+        "p95_ms": 0.914,
+        "mean_ms": 0.77,
+        "max_ms": 2.489
+      }
+    },
+    "gateway-norecall/stream": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 1.344,
+        "p95_ms": 48.104,
+        "mean_ms": 12.372,
+        "max_ms": 50.276
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 2.441,
+        "p95_ms": 49.34,
+        "mean_ms": 13.472,
+        "max_ms": 51.414
+      }
+    },
+    "gateway/json": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 0.746,
+        "p95_ms": 0.917,
+        "mean_ms": 0.754,
+        "max_ms": 2.561
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 0.747,
+        "p95_ms": 0.918,
+        "mean_ms": 0.755,
+        "max_ms": 2.562
+      }
+    },
+    "gateway/stream": {
+      "ttfb": {
+        "n": 300,
+        "p50_ms": 43.104,
+        "p95_ms": 48.887,
+        "mean_ms": 34.016,
+        "max_ms": 55.29
+      },
+      "total": {
+        "n": 300,
+        "p50_ms": 44.219,
+        "p95_ms": 49.979,
+        "mean_ms": 35.099,
+        "max_ms": 56.287
+      }
+    }
+  },
+  "overhead": {
+    "gateway/stream": {
+      "added_ttfb_p50_ms": 42.776,
+      "added_ttfb_p95_ms": 48.47,
+      "added_total_p50_ms": 42.924,
+      "added_total_p95_ms": 48.477,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 42.807,
+        "p95_ms": 48.58,
+        "mean_ms": 33.683,
+        "max_ms": 54.93
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 42.983,
+        "p95_ms": 48.694,
+        "mean_ms": 33.808,
+        "max_ms": 54.985
+      }
+    },
+    "gateway/json": {
+      "added_ttfb_p50_ms": 0.489,
+      "added_ttfb_p95_ms": 0.582,
+      "added_total_p50_ms": 0.489,
+      "added_total_p95_ms": 0.582,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 0.477,
+        "p95_ms": 0.663,
+        "mean_ms": 0.489,
+        "max_ms": 2.244
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 0.478,
+        "p95_ms": 0.664,
+        "mean_ms": 0.489,
+        "max_ms": 2.244
+      }
+    },
+    "gateway-norecall/stream": {
+      "added_ttfb_p50_ms": 1.017,
+      "added_ttfb_p95_ms": 47.687,
+      "added_total_p50_ms": 1.146,
+      "added_total_p95_ms": 47.837,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 1.019,
+        "p95_ms": 47.721,
+        "mean_ms": 12.039,
+        "max_ms": 49.924
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 1.161,
+        "p95_ms": 47.771,
+        "mean_ms": 12.181,
+        "max_ms": 49.95
+      }
+    },
+    "gateway-norecall/json": {
+      "added_ttfb_p50_ms": 0.503,
+      "added_ttfb_p95_ms": 0.579,
+      "added_total_p50_ms": 0.503,
+      "added_total_p95_ms": 0.579,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 0.497,
+        "p95_ms": 0.657,
+        "mean_ms": 0.504,
+        "max_ms": 2.233
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 0.498,
+        "p95_ms": 0.658,
+        "mean_ms": 0.504,
+        "max_ms": 2.233
+      }
+    },
+    "gateway-nodelay/stream": {
+      "added_ttfb_p50_ms": 2.047,
+      "added_ttfb_p95_ms": 3.404,
+      "added_total_p50_ms": 2.05,
+      "added_total_p95_ms": 3.583,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 2.038,
+        "p95_ms": 3.418,
+        "mean_ms": 2.176,
+        "max_ms": 11.169
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 2.038,
+        "p95_ms": 3.678,
+        "mean_ms": 2.244,
+        "max_ms": 11.446
+      }
+    },
+    "gateway-nodelay/json": {
+      "added_ttfb_p50_ms": 0.486,
+      "added_ttfb_p95_ms": 0.637,
+      "added_total_p50_ms": 0.487,
+      "added_total_p95_ms": 0.637,
+      "paired_diff_ttfb": {
+        "n": 300,
+        "p50_ms": 0.474,
+        "p95_ms": 0.705,
+        "mean_ms": 0.491,
+        "max_ms": 1.004
+      },
+      "paired_diff_total": {
+        "n": 300,
+        "p50_ms": 0.476,
+        "p95_ms": 0.705,
+        "mean_ms": 0.491,
+        "max_ms": 1.004
+      }
+    }
+  },
+  "correctness": {
+    "client_requests": 120,
+    "upstream_requests": 144,
+    "continuation_rounds": 24,
+    "assertions": {
+      "passed": 1060,
+      "failed": 0,
+      "total": 1060,
+      "by_assertion": {
+        "augmented_prompt_replayed_byte_identical": "60/60",
+        "client_never_sees_unimem_context": "157/157",
+        "client_never_sees_unimem_tool": "157/157",
+        "continuation_count": "60/60",
+        "framing_valid": "157/157",
+        "harness_tool_call_delivered": "24/24",
+        "hidden_rounds_replayed": "24/24",
+        "mixed_hidden_call_and_result_replayed": "12/12",
+        "plain_history_unchanged": "24/24",
+        "replay_byte_identical_to_continuation": "24/24",
+        "rounds_merged_into_one_message": "24/24",
+        "status_200": "157/157",
+        "system_untouched": "60/60",
+        "tools_appended_in_order": "60/60",
+        "visible_stop_reason": "60/60"
+      },
+      "failures": []
+    }
+  },
+  "anchor_collision_probe": {
+    "pairs": 10,
+    "second_session_got_first_sessions_hidden_rounds": 10,
+    "description": "two sessions send the same prompt and get the same deterministic reply that used unimem_recall; on the follow-up, does session 2's replay contain session 1's tool_use ids/results?"
+  },
+  "cache_stability": {
+    "Passthrough": {
+      "mode": "Passthrough",
+      "turns": 30,
+      "client_requests": 37,
+      "upstream_requests": 37,
+      "continuation_rounds": 0,
+      "transitions": 36,
+      "prefix_fraction_mean": 1.0,
+      "prefix_fraction_min": 1.0,
+      "fully_prefix_stable_transitions": 36,
+      "cacheable_byte_ratio": 0.987,
+      "upstream_bytes_total": 1533499,
+      "system_byte_stable": true,
+      "tools_byte_stable": true
+    },
+    "Unimem": {
+      "mode": "Unimem",
+      "turns": 30,
+      "client_requests": 37,
+      "upstream_requests": 43,
+      "continuation_rounds": 6,
+      "transitions": 42,
+      "prefix_fraction_mean": 1.0,
+      "prefix_fraction_min": 1.0,
+      "fully_prefix_stable_transitions": 42,
+      "cacheable_byte_ratio": 0.981,
+      "upstream_bytes_total": 2645782,
+      "system_byte_stable": true,
+      "tools_byte_stable": true
+    },
+    "NaiveSystem": {
+      "mode": "NaiveSystem",
+      "turns": 30,
+      "client_requests": 37,
+      "upstream_requests": 37,
+      "continuation_rounds": 0,
+      "transitions": 36,
+      "prefix_fraction_mean": 0.823,
+      "prefix_fraction_min": 0.614,
+      "fully_prefix_stable_transitions": 8,
+      "cacheable_byte_ratio": 0.804,
+      "upstream_bytes_total": 1558104,
+      "system_byte_stable": false,
+      "tools_byte_stable": true
+    },
+    "NaiveTail": {
+      "mode": "NaiveTail",
+      "turns": 30,
+      "client_requests": 37,
+      "upstream_requests": 37,
+      "continuation_rounds": 0,
+      "transitions": 36,
+      "prefix_fraction_mean": 0.988,
+      "prefix_fraction_min": 0.966,
+      "fully_prefix_stable_transitions": 12,
+      "cacheable_byte_ratio": 0.976,
+      "upstream_bytes_total": 1551893,
+      "system_byte_stable": true,
+      "tools_byte_stable": true
+    }
+  }
+}

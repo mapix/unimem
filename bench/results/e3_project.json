@@ -1,0 +1,267 @@
+{
+  "experiment": "E3 project identification",
+  "cases": 37,
+  "correct": 35,
+  "accuracy": 0.946,
+  "rows": [
+    {
+      "case": "repo root, scp-style ssh remote",
+      "cwd": "$TMP/home/code/alpha",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "nested subdir (3 levels)",
+      "cwd": "$TMP/home/code/alpha/src/deep/nested",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "clone elsewhere, https remote",
+      "cwd": "$TMP/clones/c0/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "https remote with token userinfo",
+      "cwd": "$TMP/clones/c1/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "ssh:// remote",
+      "cwd": "$TMP/clones/c2/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "uppercase owner/repo",
+      "cwd": "$TMP/clones/c3/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "https remote, trailing slash",
+      "cwd": "$TMP/clones/c4/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "ssh:// remote with port 22",
+      "cwd": "$TMP/clones/c5/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "git:// remote",
+      "cwd": "$TMP/clones/c6/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "http remote without .git",
+      "cwd": "$TMP/clones/c7/alpha-copy",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "git worktree (git worktree add)",
+      "cwd": "$TMP/home/code/alpha-feature",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "subdir of a git worktree",
+      "cwd": "$TMP/home/code/alpha-feature/src/deep",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "worktree with relative gitdir + commondir",
+      "cwd": "$TMP/home/code/alpha-manual",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "detached HEAD clone",
+      "cwd": "$TMP/clones/detached/alpha",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "different repo, same owner",
+      "cwd": "$TMP/home/code/beta",
+      "expect": "github.com/acme/beta",
+      "got": "github.com/acme/beta",
+      "ok": true
+    },
+    {
+      "case": "same owner/repo on another host (GHE)",
+      "cwd": "$TMP/work/alpha",
+      "expect": "github.acme.corp/acme/alpha",
+      "got": "github.acme.corp/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "gitlab nested groups",
+      "cwd": "$TMP/home/code/tool",
+      "expect": "gitlab.com/grp/sub/tool",
+      "got": "gitlab.com/grp/sub/tool",
+      "ok": true
+    },
+    {
+      "case": "ssh:// with non-standard port",
+      "cwd": "$TMP/home/code/infra",
+      "expect": "git.acme.dev/platform/infra",
+      "got": "git.acme.dev/platform/infra",
+      "ok": true
+    },
+    {
+      "case": "fork: upstream listed before origin",
+      "cwd": "$TMP/home/code/fork",
+      "expect": "github.com/me/project",
+      "got": "github.com/me/project",
+      "ok": true
+    },
+    {
+      "case": "only a non-origin remote",
+      "cwd": "$TMP/home/code/uponly",
+      "expect": "github.com/big/uponly",
+      "got": "github.com/big/uponly",
+      "ok": true
+    },
+    {
+      "case": "git repo without remote (root)",
+      "cwd": "$TMP/home/code/scratch",
+      "expect": "local$TMP/home/code/scratch",
+      "got": "local$TMP/home/code/scratch",
+      "ok": true
+    },
+    {
+      "case": "git repo without remote (subdir)",
+      "cwd": "$TMP/home/code/scratch/notes",
+      "expect": "local$TMP/home/code/scratch",
+      "got": "local$TMP/home/code/scratch",
+      "ok": true
+    },
+    {
+      "case": "worktree of a repo without remote",
+      "cwd": "$TMP/home/code/scratch-wt",
+      "expect": "local$TMP/home/code/scratch",
+      "got": "local$TMP/home/code/scratch",
+      "ok": true
+    },
+    {
+      "case": "git submodule (gitdir in .git/modules)",
+      "cwd": "$TMP/home/code/alpha/libs/sublib",
+      "expect": "github.com/acme/sublib",
+      "got": "github.com/acme/sublib",
+      "ok": true
+    },
+    {
+      "case": "independent repo nested in another repo",
+      "cwd": "$TMP/home/code/alpha/vendor/inner",
+      "expect": "github.com/other/inner",
+      "got": "github.com/other/inner",
+      "ok": true
+    },
+    {
+      "case": "monorepo package with its own manifest",
+      "cwd": "$TMP/home/code/alpha/packages/web",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "non-git dir with Cargo.toml",
+      "cwd": "$TMP/plain/rusty",
+      "expect": "local$TMP/plain/rusty",
+      "got": "local$TMP/plain/rusty",
+      "ok": true
+    },
+    {
+      "case": "non-git dir with README only",
+      "cwd": "$TMP/plain/docs-only",
+      "expect": "local$TMP/plain/docs-only",
+      "got": "local$TMP/plain/docs-only",
+      "ok": true
+    },
+    {
+      "case": "subdir of non-git manifest dir",
+      "cwd": "$TMP/plain/nodey/src/lib",
+      "expect": "local$TMP/plain/nodey",
+      "got": null,
+      "ok": false
+    },
+    {
+      "case": "empty non-project dir",
+      "cwd": "$TMP/plain/empty",
+      "expect": null,
+      "got": null,
+      "ok": true
+    },
+    {
+      "case": "home dir",
+      "cwd": "$TMP/home",
+      "expect": null,
+      "got": null,
+      "ok": true
+    },
+    {
+      "case": "home dir that is a dotfiles repo",
+      "cwd": "$TMP/home",
+      "expect": null,
+      "got": null,
+      "ok": true
+    },
+    {
+      "case": "plain subdir of dotfiles-repo home",
+      "cwd": "$TMP/home/Downloads",
+      "expect": null,
+      "got": null,
+      "ok": true
+    },
+    {
+      "case": "filesystem root",
+      "cwd": "/",
+      "expect": null,
+      "got": null,
+      "ok": true
+    },
+    {
+      "case": "symlink to a repo with remote",
+      "cwd": "$TMP/links/alpha-link",
+      "expect": "github.com/acme/alpha",
+      "got": "github.com/acme/alpha",
+      "ok": true
+    },
+    {
+      "case": "symlink to a repo without remote",
+      "cwd": "$TMP/links/scratch-link",
+      "expect": "local$TMP/home/code/scratch",
+      "got": "local$TMP/links/scratch-link",
+      "ok": false
+    },
+    {
+      "case": "repo gains a remote after first sight (identity kept)",
+      "cwd": "$TMP/home/code/legacy",
+      "expect": "local$TMP/home/code/legacy",
+      "got": "local$TMP/home/code/legacy",
+      "ok": true
+    }
+  ]
+}
