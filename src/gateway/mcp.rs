@@ -17,7 +17,7 @@ use crate::tools;
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
 const SESSION_HEADER: &str = "mcp-session-id";
 
-const INSTRUCTIONS: &str = "uni-mem is the user's long-term memory, shared by all of their coding agents (Claude Code, Codex, …) and organised per project. \
+const INSTRUCTIONS: &str = "unimem is the user's long-term memory, shared by all of their coding agents (Claude Code, Codex, …) and organised per project. \
 Call unimem_recall before guessing about project history, past decisions, conventions or the user's preferences. \
 Call unimem_remember when the user corrects you or states a preference, when a decision is made (include why), or when you discover a non-obvious gotcha or procedure; \
 write one self-contained sentence and never store secrets or transient status. \
@@ -71,7 +71,7 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
             return StatusCode::OK.into_response();
         }
         _ => {
-            let mut r = (StatusCode::METHOD_NOT_ALLOWED, "uni-mem MCP: use POST (no server-initiated stream)").into_response();
+            let mut r = (StatusCode::METHOD_NOT_ALLOWED, "unimem MCP: use POST (no server-initiated stream)").into_response();
             r.headers_mut().insert("allow", HeaderValue::from_static("POST, DELETE"));
             return r;
         }
@@ -138,7 +138,7 @@ async fn dispatch(st: &Shared, headers: &HeaderMap, session: &mut Option<String>
                 json!({
                     "protocolVersion": proto,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "uni-mem", "version": env!("CARGO_PKG_VERSION")},
+                    "serverInfo": {"name": "unimem", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": INSTRUCTIONS,
                 }),
             )
@@ -156,7 +156,7 @@ async fn dispatch(st: &Shared, headers: &HeaderMap, session: &mut Option<String>
             let cwd = args["cwd"].as_str().map(String::from).filter(|s| !s.is_empty()).or_else(|| header_str(headers, "x-unimem-cwd"));
             let ctx = super::make_ctx(st, &ReqInfo { harness, session: sid, cwd });
             let text = tools::exec(&st.engine, &ctx, name, &args).await;
-            let is_error = text.starts_with("uni-mem error:");
+            let is_error = text.starts_with("unimem error:");
             rpc_ok(&id, json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
         }
         "resources/list" => rpc_ok(&id, json!({"resources": []})),

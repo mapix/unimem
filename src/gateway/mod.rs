@@ -1,4 +1,4 @@
-//! The local gateway. Every harness points its base URL here; uni-mem forwards to the real upstream,
+//! The local gateway. Every harness points its base URL here; unimem forwards to the real upstream,
 //! injecting its tool face and memory context and intercepting its own tool calls on the way back.
 
 pub mod anthropic;
@@ -66,7 +66,7 @@ pub fn upstream_client(timeout_secs: u64) -> reqwest::Result<reqwest::Client> {
 
 pub fn router(state: Shared) -> Router {
     Router::new()
-        .route("/health", get(|| async { Json(json!({"ok": true, "name": "uni-mem", "version": env!("CARGO_PKG_VERSION")})) }))
+        .route("/health", get(|| async { Json(json!({"ok": true, "name": "unimem", "version": env!("CARGO_PKG_VERSION")})) }))
         .route("/v1/messages", post(anthropic::handle))
         .route("/v1/messages/count_tokens", post(anthropic::count_tokens))
         .route("/v1/responses", post(responses::handle))
@@ -214,7 +214,7 @@ pub async fn send_json(st: &AppState, url: &str, headers: &reqwest::header::Head
 }
 
 pub fn upstream_error(e: impl std::fmt::Display) -> Response {
-    (StatusCode::BAD_GATEWAY, Json(json!({"type": "error", "error": {"type": "api_error", "message": format!("uni-mem: upstream unreachable: {e}")}}))).into_response()
+    (StatusCode::BAD_GATEWAY, Json(json!({"type": "error", "error": {"type": "api_error", "message": format!("unimem: upstream unreachable: {e}")}}))).into_response()
 }
 
 /// Pass an upstream response through unchanged (status, headers, streamed body).

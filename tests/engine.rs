@@ -18,7 +18,7 @@ fn git_project(dir: &std::path::Path, name: &str) -> String {
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::write(root.join(".git/config"), format!("[remote \"origin\"]\n\turl = git@github.com:me/{name}.git\n")).unwrap();
-    std::fs::write(root.join("README.md"), format!("# {name}\n\n{name} is a small tool for testing uni-mem project detection.\n")).unwrap();
+    std::fs::write(root.join("README.md"), format!("# {name}\n\n{name} is a small tool for testing unimem project detection.\n")).unwrap();
     root.display().to_string()
 }
 

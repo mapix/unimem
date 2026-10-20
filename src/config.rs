@@ -32,7 +32,7 @@ pub struct Upstream {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inject {
-    /// Master switch; when false uni-mem is a pure pass-through recorder.
+    /// Master switch; when false unimem is a pure pass-through recorder.
     pub enabled: bool,
     /// Expose `unimem_*` tools to the model.
     pub tools: bool,

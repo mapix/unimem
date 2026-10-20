@@ -286,9 +286,9 @@ async fn after_round(st: &AppState, ctx: &Ctx, content: &[Value], stop_reason: &
         let name = b["name"].as_str().unwrap_or("");
         let args = b.get("input").cloned().unwrap_or(json!({}));
         let out = tools::exec(&st.engine, ctx, name, &args).await;
-        tracing::debug!(tool = name, "executed uni-mem tool");
+        tracing::debug!(tool = name, "executed unimem tool");
         let mut r = json!({"type": "tool_result", "tool_use_id": b["id"], "content": out});
-        if out.starts_with("uni-mem error:") {
+        if out.starts_with("unimem error:") {
             r["is_error"] = json!(true);
         }
         results.push(r);

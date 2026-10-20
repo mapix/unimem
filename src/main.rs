@@ -1,4 +1,4 @@
-//! `unimem` — the uni-mem gateway and its command-line interface.
+//! `unimem` — the unimem gateway and its command-line interface.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -15,7 +15,7 @@ use unimem::store::{Memory, Store};
 use unimem::util::{fmt_date, truncate_chars};
 
 #[derive(Parser)]
-#[command(name = "unimem", version, about = "uni-mem: one shared, project-aware long-term memory for every coding agent")]
+#[command(name = "unimem", version, about = "unimem: one shared, project-aware long-term memory for every coding agent")]
 struct Cli {
     /// Config file (default: $UNIMEM_CONFIG or ~/.unimem/config.toml).
     #[arg(long, global = true, env = "UNIMEM_CONFIG")]
@@ -179,7 +179,7 @@ fn setup_text(harness: &str, listen: &str) -> Option<String> {
     let base = format!("http://{listen}");
     Some(match harness {
         "claude-code" | "claude" | "cc" => format!(
-            "# Claude Code — route model traffic through uni-mem (API key and subscription OAuth both pass through):\n\
+            "# Claude Code — route model traffic through unimem (API key and subscription OAuth both pass through):\n\
              export ANTHROPIC_BASE_URL={base}\n\
              # add it to ~/.zshrc / ~/.bashrc, or to ~/.claude/settings.json:\n\
              #   {{ \"env\": {{ \"ANTHROPIC_BASE_URL\": \"{base}\" }} }}\n\n\
@@ -190,7 +190,7 @@ fn setup_text(harness: &str, listen: &str) -> Option<String> {
             "# Codex CLI — add to ~/.codex/config.toml:\n\
              model_provider = \"unimem\"\n\n\
              [model_providers.unimem]\n\
-             name = \"uni-mem\"\n\
+             name = \"unimem\"\n\
              base_url = \"{base}/v1\"\n\
              wire_api = \"responses\"\n\
              requires_openai_auth = true   # keeps your ChatGPT login / OPENAI_API_KEY\n\n\
@@ -503,7 +503,7 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen).await.with_context(|| format!("binding {}", cfg.listen))?;
     let addr = listener.local_addr()?;
-    println!("uni-mem {} listening on http://{addr}", env!("CARGO_PKG_VERSION"));
+    println!("unimem {} listening on http://{addr}", env!("CARGO_PKG_VERSION"));
     println!("  db:       {}", cfg.db_path().display());
     println!("  decider:  {}", engine.decider.describe());
     println!("  embedder: {}", engine.embedder.id());

@@ -54,7 +54,7 @@ async fn mcp_roundtrip() {
     let sid = sid.expect("session id header");
     let v = v.unwrap();
     assert_eq!(v["result"]["protocolVersion"], "2025-03-26");
-    assert_eq!(v["result"]["serverInfo"]["name"], "uni-mem");
+    assert_eq!(v["result"]["serverInfo"]["name"], "unimem");
     assert!(v["result"]["capabilities"]["tools"].is_object());
     assert!(v["result"]["instructions"].as_str().unwrap().contains("unimem_recall"));
 

@@ -1,4 +1,4 @@
-# uni-mem 设计文档（v0.1）
+# unimem 设计文档（v0.1）
 
 > 一句话：一个跑在本机的 LLM 网关。所有 coding harness（Claude Code、Codex、任何 OpenAI/Anthropic 兼容客户端）只需把 base URL 指过来，就共享同一份、按项目自动归档的长期记忆。
 
@@ -17,7 +17,7 @@
 ## 1. 总体架构
 
 ```
- Claude Code ─┐  /v1/messages            ┌──────────────── uni-mem (单二进制) ────────────────┐
+ Claude Code ─┐  /v1/messages            ┌──────────────── unimem (单二进制) ────────────────┐
  Codex ───────┼─ /v1/responses ─────────►│ Dialect 适配 ─► Turn 分类 ─► 上下文提取(cwd/会话)    │──► 上游
  其它客户端 ──┘  /v1/chat/completions     │      │              │            │                 │   (Anthropic /
                                           │      ▼              ▼            ▼                 │    OpenAI /

@@ -242,7 +242,7 @@ async fn after_round(st: &AppState, ctx: &Ctx, msg: &Value, finish: &str, conts:
         let name = call_name(c);
         let args: Value = serde_json::from_str(c["function"]["arguments"].as_str().unwrap_or("")).unwrap_or_else(|_| json!({}));
         let out = tools::exec(&st.engine, ctx, name, &args).await;
-        tracing::debug!(tool = name, "executed uni-mem tool");
+        tracing::debug!(tool = name, "executed unimem tool");
         results.push(json!({"role": "tool", "tool_call_id": c["id"], "content": out}));
     }
     let harness = all.iter().any(|c| !is_our_call(c));

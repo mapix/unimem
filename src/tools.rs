@@ -1,4 +1,4 @@
-//! The tool face uni-mem injects into every agent turn. Definitions are constant (byte-stable for prompt caching);
+//! The tool face unimem injects into every agent turn. Definitions are constant (byte-stable for prompt caching);
 //! execution happens inside the gateway, never in the harness.
 
 use serde_json::{json, Value};
@@ -107,7 +107,7 @@ fn s(v: &Value, k: &str) -> Option<String> {
 pub async fn exec(engine: &Engine, ctx: &Ctx, name: &str, args: &Value) -> String {
     match exec_inner(engine, ctx, name, args).await {
         Ok(s) => s,
-        Err(e) => format!("uni-mem error: {e}"),
+        Err(e) => format!("unimem error: {e}"),
     }
 }
 
@@ -190,6 +190,6 @@ async fn exec_inner(engine: &Engine, ctx: &Ctx, name: &str, args: &Value) -> any
             }
             Ok(out)
         }
-        _ => Ok(format!("unknown uni-mem tool {name}")),
+        _ => Ok(format!("unknown unimem tool {name}")),
     }
 }

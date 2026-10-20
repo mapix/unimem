@@ -1,8 +1,8 @@
-# uni-mem
+# unimem
 
 **One shared, project-aware long-term memory for every coding agent.**
 
-uni-mem is a single local binary that sits between your coding harnesses (Claude Code, Codex CLI, anything
+unimem is a single local binary that sits between your coding harnesses (Claude Code, Codex CLI, anything
 OpenAI- or Anthropic-compatible) and the model API. Point each harness's base URL at it, and they all share the same
 memory: the correction you gave Claude Code this morning is known to Codex this afternoon, filed under the right
 project.
@@ -17,13 +17,13 @@ storage, they don't know about each other, and they mostly don't separate "about
 If you use more than one agent, you end up repeating yourself.
 
 Memory belongs to the user, not to the tool. The only integration point every harness shares is the model API, and
-every harness lets you change its base URL. So uni-mem lives there and needs no plugin for each harness.
+every harness lets you change its base URL. So unimem lives there and needs no plugin for each harness.
 
 ## How it works
 
 ```
 Claude Code ─┐ /v1/messages
-Codex ───────┼ /v1/responses        ──►  uni-mem (127.0.0.1:4777)  ──►  api.anthropic.com / api.openai.com / chatgpt.com
+Codex ───────┼ /v1/responses        ──►  unimem (127.0.0.1:4777)  ──►  api.anthropic.com / api.openai.com / chatgpt.com
 other ───────┘ /v1/chat/completions        │
 MCP client ──── /mcp                       └─ SQLite ~/.unimem/unimem.db
 ```
@@ -31,12 +31,12 @@ MCP client ──── /mcp                       └─ SQLite ~/.unimem/unime
 - **Gateway, transparent by default.** Requests are forwarded to the real upstream with the original auth headers
   (API keys and subscription OAuth). Helper requests, such as title generation, token counting and model lists,
   pass through untouched. If anything in the memory layer fails, the request goes through unmodified.
-- **Tool interception.** On agent turns, uni-mem appends four tools to the request: `unimem_recall`,
+- **Tool interception.** On agent turns, unimem appends four tools to the request: `unimem_recall`,
   `unimem_remember`, `unimem_forget` and `unimem_project`. When the model calls one, the streaming rewriter holds
   back that call, runs it inside the gateway, and continues the generation upstream. The harness only sees one
   continuous response and never sees a tool it doesn't know. The model in the loop (System Two) writes the
   memories, because it understands what matters.
-- **Cache-friendly overlay replay.** Every change uni-mem makes is stored as an *overlay*, keyed by content anchors
+- **Cache-friendly overlay replay.** Every change unimem makes is stored as an *overlay*, keyed by content anchors
   that the harness sends back verbatim. Changes include the session preamble, passive recall blocks, and hidden tool
   calls with their results. Each later request in the session re-applies those changes byte-for-byte, so prompt-cache
   prefixes stay stable and the model remembers what it looked up. The system prompt is never modified.
@@ -75,7 +75,7 @@ Add this to `~/.codex/config.toml`:
 model_provider = "unimem"
 
 [model_providers.unimem]
-name = "uni-mem"
+name = "unimem"
 base_url = "http://127.0.0.1:4777/v1"
 wire_api = "responses"
 requires_openai_auth = true
@@ -92,7 +92,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:4777
 
 ## MCP fallback
 
-If you'd rather not route model traffic through uni-mem, the same tools are served over MCP Streamable HTTP at
+If you'd rather not route model traffic through unimem, the same tools are served over MCP Streamable HTTP at
 `/mcp`. In this mode you get no passive recall, preamble or episode capture. The agent has to call the tools itself.
 
 ```sh
@@ -132,7 +132,7 @@ The global option `--config PATH` (or `$UNIMEM_CONFIG`) selects the config file.
 
 ## Configuration
 
-`~/.unimem/config.toml`. Every field is optional, and with no file uni-mem runs fully offline (heuristic decider,
+`~/.unimem/config.toml`. Every field is optional, and with no file unimem runs fully offline (heuristic decider,
 hash embedder). `unimem config` prints this sample:
 
 ```toml

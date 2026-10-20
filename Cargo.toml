@@ -1,5 +1,5 @@
 [package]
-name = "uni-mem"
+name = "unimem"
 version = "0.1.0"
 edition = "2021"
 description = "Harness-agnostic unified memory: a local LLM gateway that gives every coding agent one shared, project-aware long-term memory."
