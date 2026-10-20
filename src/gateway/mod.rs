@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod responses;
 pub mod sse;
 pub mod turn;
+pub mod ui;
 
 use axum::{
     body::{Body, Bytes},
@@ -78,6 +79,7 @@ pub fn router(state: Shared) -> Router {
         .route("/mcp", any(mcp::handle))
         .route("/unimem/recall", post(api_recall))
         .route("/unimem/remember", post(api_remember))
+        .merge(ui::routes())
         .fallback(passthrough)
         .with_state(state)
 }

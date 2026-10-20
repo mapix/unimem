@@ -797,6 +797,31 @@ impl Store {
         Ok(self.conn.lock().execute("DELETE FROM overlays WHERE created_at < ?", [now_ts() - older_than_secs])?)
     }
 
+    // ---------- ui helpers ----------
+    /// All graph edges (newest first), capped.
+    pub fn all_edges(&self, limit: usize) -> Vec<Edge> {
+        let c = self.conn.lock();
+        let mut st = match c.prepare(&format!("SELECT src,dst,rel,weight,judged_by FROM edges ORDER BY created_at DESC LIMIT {limit}")) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        st.query_map([], |r| Ok(Edge { src: r.get(0)?, dst: r.get(1)?, rel: r.get(2)?, weight: r.get(3)?, judged_by: r.get(4)? }))
+            .map(|it| it.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The most recent raw episode turns, newest first.
+    pub fn recent_episodes(&self, n: usize) -> Vec<Episode> {
+        let c = self.conn.lock();
+        let mut st = match c.prepare(&format!("SELECT id,session,harness,pid,role,text,ts FROM episodes ORDER BY id DESC LIMIT {n}")) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        st.query_map([], |r| Ok(Episode { id: r.get(0)?, session: r.get(1)?, harness: r.get(2)?, pid: r.get(3)?, role: r.get(4)?, text: r.get(5)?, ts: r.get(6)? }))
+            .map(|it| it.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
     // ---------- traces ----------
     pub fn trace(&self, kind: &str, data: &serde_json::Value) {
         let _ = self.conn.lock().execute(

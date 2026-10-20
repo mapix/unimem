@@ -118,6 +118,18 @@ enum Cmd {
     Config,
     /// Print setup instructions for a harness: claude-code, codex, shell, mcp.
     Setup { harness: String },
+    /// Print the web UI URL (served by `unimem serve` at /ui) and open it in a browser.
+    Ui {
+        /// Only print the URL.
+        #[arg(long)]
+        no_open: bool,
+    },
+    /// Write ~45 realistic demo memories (3 projects + global, every kind, supersede chains, causal links).
+    DemoSeed {
+        /// Where to create the demo project repos (default: <data_dir>/demo-repos).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 
 const SAMPLE_CONFIG: &str = r#"# ~/.unimem/config.toml — every field is optional.
@@ -471,6 +483,27 @@ async fn main() -> Result<()> {
             }
             None => anyhow::bail!("unknown harness '{harness}' (try: claude-code, codex, shell, mcp)"),
         },
+        Cmd::Ui { no_open } => {
+            let url = format!("http://{}/ui", cfg.listen);
+            let up = tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(&cfg.listen)).await.is_ok_and(|r| r.is_ok());
+            println!("{url}");
+            if !up {
+                eprintln!("(the gateway is not running on {}; start it with `unimem serve`)", cfg.listen);
+            }
+            if !no_open {
+                let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+                let _ = std::process::Command::new(opener).arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+            }
+            Ok(())
+        }
+        Cmd::DemoSeed { dir } => {
+            let e = open(&cfg)?;
+            let dir = dir.unwrap_or_else(|| cfg.data_dir().join("demo-repos"));
+            let n = gateway::ui::demo_seed(&e, &dir).await?;
+            println!("seeded {n} demo memories across {} projects + global (repos in {})", e.store.list_projects().len(), dir.display());
+            println!("open the UI: unimem serve, then http://{}/ui", cfg.listen);
+            Ok(())
+        }
     }
 }
 
@@ -522,6 +555,7 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
     println!("  Claude Code:  export ANTHROPIC_BASE_URL=http://{addr}");
     println!("  Codex:        unimem setup codex   (model_provider with base_url http://{addr}/v1, wire_api = \"responses\")");
     println!("  MCP only:     http://{addr}/mcp");
+    println!("web UI:         http://{addr}/ui");
 
     gateway::serve_with_shutdown(listener, gateway::router(state), async {
         let _ = tokio::signal::ctrl_c().await;

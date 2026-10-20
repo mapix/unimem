@@ -127,8 +127,36 @@ the current directory or `--cwd`.
 | `unimem distill [--now]` | run the distiller once |
 | `unimem config` | config path + commented sample |
 | `unimem setup <harness>` | integration snippets |
+| `unimem ui [--no-open]` | print (and open) the web UI URL |
+| `unimem demo-seed [--dir PATH]` | write ~45 demo memories across 3 throwaway projects + global |
 
 The global option `--config PATH` (or `$UNIMEM_CONFIG`) selects the config file.
+
+## Web UI
+
+`unimem serve` also serves a local web UI at `http://127.0.0.1:4777/ui` (`unimem ui` prints and opens the URL).
+It is one self-contained page embedded in the binary: no CDN, works offline, light by default with a dark mode.
+
+- **Overview**: what is in memory, by kind, project and agent; the standing rules every session starts with; recent writes and engine activity.
+- **Memories**: filter by scope, project, kind and agent, or search the way an agent would ask (the real recall ranking, plus exact text matches). Each kind is shown in its own form: preferences as rule chips grouped *everywhere* vs per project, decisions as ADR-style records (decision, because, date) with their version chain `v1 → v2 → current`, procedures as terminal blocks with copyable commands, gotchas as amber warnings, facts as notes with entity tags, episodes on a date rail. Superseded notes can be shown, struck through and linked to their successor.
+- **Projects**: one board per repository with the editable project card (summary every agent reads, stack, aliases, root, remote) and its notes grouped by kind.
+- **Graph**: the memory graph in a small force layout, edges coloured by type (supersedes, causal, same thing, same session, similar), click a node to open it.
+- **Timeline**: notes by day, with the moments a decision or rule was replaced.
+- **Recall playground**: type a prompt, pick the project (or a cwd) and see exactly what the gateway would inject: scores, how each note was found, whether the answer looks sufficient, the literal `<unimem-recall>` block and the session preamble.
+- **Activity**: every write, recall and edit, plus the raw turns the distiller reads.
+
+Click any note for its detail: content, reason, source (agent, session, cwd, branch, commit), entities, connected notes and versions, with pin / edit (re-embeds) / move scope / delete.
+
+The JSON API behind it lives under `/ui/api/` (`overview`, `memories`, `memories/:id`, `projects`, `projects/:pid`,
+`graph`, `timeline`, `traces`, `recall`). Like the rest of the gateway it is meant for `127.0.0.1` only and has no
+authentication.
+
+To try it on sample data without touching your memory:
+
+```sh
+export UNIMEM_DATA_DIR=/tmp/unimem-demo UNIMEM_LISTEN=127.0.0.1:4799
+unimem demo-seed && unimem serve     # then open http://127.0.0.1:4799/ui
+```
 
 ## Configuration
 
