@@ -1,0 +1,16 @@
+lme-session unimem-prior-e5    - hybrid-rrf       recall_all@10    -0.033 [-0.053, -0.014] win/loss 2/16
+lme-session unimem-prior-e5    - e5-small         recall_all@10    -0.031 [-0.053, -0.012] win/loss 3/16
+lme-session unimem-prior-hash  - bm25             recall_all@10    +0.000 [-0.017, +0.017] win/loss 7/7
+lme-session unimem-prior-e5    - unimem-prior-hash recall_all@10    +0.014 [+0.002, +0.029] win/loss 7/1
+lme-session hybrid-rrf         - e5-small         recall_all@10    +0.002 [-0.012, +0.017] win/loss 6/5
+lme-session e5-small           - bm25             recall_all@10    +0.045 [+0.021, +0.069] win/loss 23/4
+lme-turn   unimem-prior-e5    - hybrid-rrf       recall_all@10    -0.055 [-0.079, -0.033] win/loss 3/26
+lme-turn   unimem-prior-e5    - e5-small         recall_all@10    -0.053 [-0.084, -0.024] win/loss 14/36
+lme-turn   unimem-prior-hash  - bm25             recall_all@10    +0.010 [-0.017, +0.033] win/loss 16/12
+lme-turn   unimem-prior-e5    - unimem-prior-hash recall_all@10    +0.019 [+0.005, +0.036] win/loss 10/2
+lme-turn   hybrid-rrf         - e5-small         recall_all@10    +0.002 [-0.024, +0.029] win/loss 16/15
+lme-turn   e5-small           - bm25             recall_all@10    +0.081 [+0.045, +0.117] win/loss 50/16
+locomo     unimem-prior-e5    - hybrid-rrf       recall_frac@10   +0.014 [-0.001, +0.030] win/loss 199/177
+locomo     unimem-prior-hash  - bm25             recall_frac@10   +0.066 [+0.052, +0.080] win/loss 230/68
+locomo     unimem-prior-e5    - e5-small         recall_frac@10   +0.095 [+0.073, +0.116] win/loss 417/216
+locomo     hybrid-rrf         - e5-small         recall_frac@10   +0.081 [+0.064, +0.098] win/loss 311/124

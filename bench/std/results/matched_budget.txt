@@ -1,0 +1,40 @@
+
+lme-session: depth = #notes returned by unimem-e5 per question (mean 1.89)
+  system              hit (any gold)  evidence recall  precision
+  unimem-e5                    0.916            0.765      0.811
+  bm25                         0.919            0.757      0.803
+  e5-small                     0.897            0.728      0.765
+  hybrid-rrf                   0.921            0.768      0.806
+  unimem-prior-e5              0.916            0.765      0.811
+
+lme-turn: depth = #notes returned by unimem-e5 per question (mean 2.83)
+  system              hit (any gold)  evidence recall  precision
+  unimem-e5                    0.826            0.641      0.542
+  bm25                         0.821            0.632      0.530
+  e5-small                     0.804            0.615      0.499
+  hybrid-rrf                   0.850            0.671      0.554
+  unimem-prior-e5              0.826            0.641      0.542
+
+locomo-turn: depth = #notes returned by unimem-e5 per question (mean 3.55)
+  system              hit (any gold)  evidence recall  precision
+  unimem-e5                    0.570            0.520      0.323
+  bm25                         0.462            0.420      0.274
+  e5-small                     0.417            0.369      0.222
+  hybrid-rrf                   0.509            0.456      0.277
+  unimem-prior-e5              0.571            0.521      0.324
+
+lme-turn: depth = #notes returned by unimem-hash per question (mean 2.35)
+  system              hit (any gold)  evidence recall  precision
+  unimem-hash                  0.809            0.603      0.567
+  bm25                         0.795            0.594      0.552
+  e5-small                     0.768            0.560      0.510
+  hybrid-rrf                   0.835            0.621      0.574
+  unimem-prior-hash            0.809            0.601      0.566
+
+locomo-turn: depth = #notes returned by unimem-hash per question (mean 2.88)
+  system              hit (any gold)  evidence recall  precision
+  unimem-hash                  0.547            0.498      0.339
+  bm25                         0.435            0.396      0.283
+  e5-small                     0.393            0.345      0.231
+  hybrid-rrf                   0.477            0.426      0.287
+  unimem-prior-hash            0.548            0.498      0.339

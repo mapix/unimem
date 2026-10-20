@@ -1,0 +1,14 @@
+LongMemEval_S session index, 419 questions:
+  recall_all@5                     official 0.7422   unimem-std-bench 0.7422   max |diff| 0.00e+00
+  ndcg_any@5                       official 0.7715   unimem-std-bench 0.7715   max |diff| 0.00e+00
+  recall_all@10                    official 0.8234   unimem-std-bench 0.8234   max |diff| 0.00e+00
+  ndcg_any@10                      official 0.7939   unimem-std-bench 0.7939   max |diff| 1.11e-16
+LongMemEval_S turn index, 419 questions:
+  recall_all@5                     official 0.4893   unimem-std-bench 0.4893   max |diff| 0.00e+00
+  ndcg_any@5                       official 0.5311   unimem-std-bench 0.5311   max |diff| 0.00e+00
+  session_from_turn recall_all@5   official 0.5274   unimem-std-bench 0.5274   max |diff| 0.00e+00
+  session_from_turn ndcg_any@5     official 0.5401   unimem-std-bench 0.5401   max |diff| 0.00e+00
+  recall_all@10                    official 0.5919   unimem-std-bench 0.5919   max |diff| 0.00e+00
+  ndcg_any@10                      official 0.5641   unimem-std-bench 0.5641   max |diff| 1.11e-16
+  session_from_turn recall_all@10  official 0.6444   unimem-std-bench 0.6444   max |diff| 0.00e+00
+  session_from_turn ndcg_any@10    official 0.5724   unimem-std-bench 0.5724   max |diff| 1.11e-16
