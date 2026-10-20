@@ -7,12 +7,12 @@ All notable changes to this project are documented here. The format is based on
 Benchmark numbers are from the offline configuration (heuristic decider, hash embedder). E1 figures are on the
 out-of-sample `heldout2` set unless noted otherwise. Details: `bench/results/`.
 
-## [Unreleased]
+## [0.5.0] — 2026-10-21
 
 ### Added
 - Open-source readiness: this README, the license, contributing and security docs, a CI workflow, issue and PR
   templates, and a commented `examples/config.toml`.
-- v0.5 engine work (commit `7c8742a`; the crate version is still 0.4.0): the relevance prior uses a z-scored cosine
+- v0.5 engine work (commit `7c8742a`): the relevance prior uses a z-scored cosine
   and an RRF term, with weights fitted per embedder family on dev data only (`PRIOR_HASH`, `PRIOR_DENSE`);
   `Depth::TopK` ranking mode for explicit `k` (agent tool, CLI `-k`, UI, `/api/recall`); the ONNX e5 embedder as a
   production option (`unimem models download e5-small`). Results: `bench/std/RESULTS.md` §7 and `bench/results/v0.5/`.

@@ -43,17 +43,17 @@ git remote add origin git@github.com:mapix/unimem.git    # or https://github.com
 git push -u origin main
 ```
 
-## 2. Tag v0.4.0
+## 2. Tag v0.5.0
 
 ```sh
-git tag -a v0.4.0 -m "unimem v0.4.0"
-git push origin v0.4.0
+git tag -a v0.5.0 -m "unimem v0.5.0"
+git push origin v0.5.0
 ```
 
 ## 3. GitHub release (optional)
 
 ```sh
-gh release create v0.4.0 --title "unimem v0.4.0" --notes-file - <<'EOF'
+gh release create v0.5.0 --title "unimem v0.5.0" --notes-file - <<'EOF'
 First public release. **Experimental**: tested against mock upstreams and synthetic benchmarks, not yet against
 long-term real Claude Code / Codex traffic. See "Status & known limitations" in the README.
 
@@ -75,8 +75,8 @@ To attach a macOS binary:
 
 ```sh
 cargo build --release
-tar -C target/release -czf unimem-v0.4.0-$(uname -m)-apple-darwin.tar.gz unimem
-gh release upload v0.4.0 unimem-v0.4.0-$(uname -m)-apple-darwin.tar.gz
+tar -C target/release -czf unimem-v0.5.0-$(uname -m)-apple-darwin.tar.gz unimem
+gh release upload v0.5.0 unimem-v0.5.0-$(uname -m)-apple-darwin.tar.gz
 ```
 
 ## 4. After pushing
