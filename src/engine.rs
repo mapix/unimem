@@ -60,6 +60,21 @@ pub struct RecallReq {
     pub k: usize,
     /// Passive (gateway-initiated) recall: apply the "is memory needed at all" gate.
     pub passive: bool,
+    /// How many notes to return: the adaptive cut-off (injection, precision first) or the full ranked top-k.
+    pub depth: Depth,
+}
+
+/// Recall depth policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Depth {
+    /// Only notes that are relevant and close to the best one (`T_RELEVANT`, `KEEP_RATIO`): usually 1–3 notes.
+    /// Used for passive injection, where every injected note costs context and attention.
+    #[default]
+    Adaptive,
+    /// Ranking mode: the top `k` notes by relevance, whatever their score (scores are returned). Used when the
+    /// caller asks for k notes explicitly (agent tool, CLI `-k`, benchmarks).
+    TopK,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,34 +147,93 @@ pub struct Evidence {
     pub coverage: f64,
     /// BM25 relative to the best BM25 score of this query (0 when no lexical match)
     pub lex_rel: f64,
-    /// cosine similarity of the embeddings
+    /// raw cosine similarity of the embeddings (embedder-specific scale; informational, not used by the prior)
     pub cos: f64,
-    /// cosine relative to the best cosine of this query
+    /// raw cosine relative to the best cosine of this query (informational)
     pub cos_rel: f64,
     /// coverage relative to the best coverage among this query's candidates
     pub cov_rel: f64,
     /// the query asks for a reason and the note gives one
     pub reason_match: bool,
+    /// Embedder-normalised cosine: z-score of this note's cosine within the query's whole candidate pool (every
+    /// live note in the searched scopes). Anisotropic embedders (E5: unrelated texts at 0.75–0.85) and the hash
+    /// embedder (unrelated texts near 0) land on the same scale, so one set of weights serves both.
+    pub cos_z: f64,
+    /// `cos_z` relative to the best `cos_z` of this query (1 for the nearest note)
+    pub cos_zrel: f64,
+    /// Reciprocal-rank fusion of the BM25 rank and the cosine rank (k = 60), scaled so that rank 1 in both is 1.
+    pub rrf: f64,
 }
 
-/// Calibrated relevance prior: a logistic model of the evidence, P(note is useful for the query). The weights were
-/// fitted by logistic regression on development data (every feature is generic: lexical coverage and BM25, cosine,
-/// their values relative to the query's best candidate, and a reason/why match). Low absolute values are expected:
-/// most candidates of a query are not the answer. With a model-backed decider the same scale applies to its answer.
-pub fn relevance_prior(e: &Evidence) -> f64 {
-    let z = W_BIAS + W_COV * e.coverage + W_LEX * e.lex_rel + W_COS * e.cos + W_COS_REL * e.cos_rel + W_COV_REL * e.cov_rel + if e.reason_match { W_REASON } else { 0.0 };
+/// Weights of the calibrated relevance prior, one set per embedder family.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct PriorWeights {
+    pub bias: f64,
+    pub coverage: f64,
+    pub lex_rel: f64,
+    pub cov_rel: f64,
+    pub cos_z: f64,
+    pub cos_zrel: f64,
+    pub rrf: f64,
+    pub reason_match: f64,
+}
+
+/// Fitted on development data only (`bench/std/fit_prior.py` → `bench/results/v0.5/prior_fit.json`): devmem +
+/// heldout written through the real write path, and the dev half of LongMemEval_S (session and turn units).
+/// Hash embedder (`hash2-*`): the lexical features carry most of the weight, the cosine adds little.
+pub const PRIOR_HASH: PriorWeights = PriorWeights { bias: -6.16, coverage: 1.559, lex_rel: 1.841, cov_rel: 1.821, cos_z: 0.195, cos_zrel: 0.466, rrf: 0.874, reason_match: 0.478 };
+/// Transformer embedders (fitted with multilingual-e5-small): the normalised cosine carries about as much weight as
+/// BM25. Used for every non-hash embedder (`onnx:*`, `openai:*`), whose cosines `cos_z` puts on the same scale.
+pub const PRIOR_DENSE: PriorWeights = PriorWeights { bias: -6.526, coverage: 0.888, lex_rel: 1.271, cov_rel: 1.455, cos_z: 0.685, cos_zrel: 1.469, rrf: 0.69, reason_match: 0.423 };
+
+impl PriorWeights {
+    pub fn for_embedder(id: &str) -> Self {
+        if id.to_lowercase().starts_with("hash") {
+            PRIOR_HASH
+        } else {
+            PRIOR_DENSE
+        }
+    }
+}
+
+/// Calibrated relevance prior: a logistic model of the evidence, P(note is useful for the query). Every feature is
+/// generic and on an embedder-independent scale: lexical coverage and BM25 (relative to the query's best), the
+/// cosine as a z-score within the query's candidate pool (and relative to the best z), the RRF fusion of the BM25
+/// and cosine ranks, and a reason/why match. Each source (and each query inside it) had the same weight in the fit;
+/// the intercept was then re-fitted on the product-style notes (devmem + heldout), the scale on which the recall
+/// thresholds (`T_RELEVANT`, `KEEP_RATIO`, `T_SUFFICIENT`) were set. Low absolute values are expected: most
+/// candidates of a query are not the answer. With a model-backed decider the same scale applies to its answer.
+pub fn relevance_prior(e: &Evidence, w: &PriorWeights) -> f64 {
+    let z = w.bias
+        + w.coverage * e.coverage
+        + w.lex_rel * e.lex_rel
+        + w.cov_rel * e.cov_rel
+        + w.cos_z * e.cos_z.clamp(Z_MIN, Z_MAX)
+        + w.cos_zrel * e.cos_zrel
+        + w.rrf * e.rrf
+        + if e.reason_match { w.reason_match } else { 0.0 };
     1.0 / (1.0 + (-z).exp())
 }
-const W_BIAS: f64 = -5.1;
-const W_COV: f64 = 1.2;
-const W_LEX: f64 = 1.5;
-const W_COS: f64 = 0.25;
-const W_COS_REL: f64 = 0.6;
-const W_REASON: f64 = 1.0;
-const W_COV_REL: f64 = 1.7;
+/// `cos_z` is clamped: beyond a few standard deviations the tail says nothing more.
+const Z_MIN: f64 = -3.0;
+const Z_MAX: f64 = 8.0;
+/// RRF constant (Cormack et al. 2009).
+const RRF_K: f64 = 60.0;
+
+/// One scored recall candidate (the anchor stage of recall, before System One and the cut-off).
+#[derive(Debug, Clone, Serialize)]
+pub struct Candidate {
+    pub id: String,
+    pub prior: f64,
+    pub ev: Evidence,
+}
 
 impl Engine {
-    pub fn new(cfg: Config, store: Store) -> Self {
+    pub fn new(mut cfg: Config, store: Store) -> Self {
+        if cfg.embedder.kind == "onnx" && cfg.embedder.model.is_empty() {
+            // default location of `unimem models download e5-small`
+            cfg.embedder.model = cfg.data_dir().join("models").join(crate::embed::E5_SMALL.dir).display().to_string();
+        }
         let embedder = crate::embed::build(&cfg.embedder);
         let decider = ChainDecider::from_config(&cfg.decider);
         let e = Self { store, embedder, decider, resolver: Resolver::default(), cfg, passive_ok: Default::default() };
@@ -495,6 +569,64 @@ impl Engine {
         scopes
     }
 
+    /// The anchor stage of recall: BM25 top-`anchor_k` ∪ cosine top-`anchor_k` over live notes in `scopes`, each with
+    /// its [`Evidence`] and [`relevance_prior`], best first. Queries are embedded with [`Embedder::embed_query`]
+    /// (asymmetric embedders such as E5 need the query prefix).
+    pub async fn candidates(&self, q: &str, scopes: &[String], anchor_k: usize) -> Result<Vec<Candidate>> {
+        let qemb = self.embedder.embed_query(q).await?;
+        let lex = self.store.lex_search(q, scopes, anchor_k);
+        let (vs, mean, sd, _) = self.store.vec_search_stats(&qemb, scopes, anchor_k);
+        if lex.is_empty() && vs.is_empty() {
+            return Ok(vec![]);
+        }
+        let sd = sd.max(1e-6);
+        let max_lex = lex.first().map(|h| h.score).unwrap_or(0.0).max(1e-9);
+        let max_cos = vs.first().map(|x| x.1 as f64).unwrap_or(0.0).max(1e-9);
+        let max_z = vs.first().map(|x| (x.1 as f64 - mean) / sd).unwrap_or(0.0).clamp(Z_MIN, Z_MAX).max(1e-6);
+        let rrf_norm = 2.0 / (RRF_K + 1.0);
+        let w = self.prior_weights();
+        let wants_reason = screen::asks_why(q);
+        let mut ev: HashMap<String, Evidence> = HashMap::new();
+        let mut order: Vec<String> = vec![];
+        for (r, h) in lex.iter().enumerate() {
+            let e = ev.entry(h.id.clone()).or_insert_with(|| {
+                order.push(h.id.clone());
+                Evidence::default()
+            });
+            e.coverage = h.coverage;
+            e.lex_rel = h.score / max_lex;
+            e.rrf += 1.0 / (RRF_K + r as f64 + 1.0) / rrf_norm;
+        }
+        let mut have_cos: HashSet<String> = HashSet::new();
+        for (r, (id, c)) in vs.iter().enumerate() {
+            let e = ev.entry(id.clone()).or_insert_with(|| {
+                order.push(id.clone());
+                Evidence::default()
+            });
+            e.cos = *c as f64;
+            e.rrf += 1.0 / (RRF_K + r as f64 + 1.0) / rrf_norm;
+            have_cos.insert(id.clone());
+        }
+        let mems: HashMap<String, Memory> = if wants_reason { self.store.get_memories(&order).into_iter().map(|m| (m.id.clone(), m)).collect() } else { HashMap::new() };
+        let max_cov = ev.values().map(|e| e.coverage).fold(0.0, f64::max).max(1e-9);
+        let mut out: Vec<Candidate> = Vec::with_capacity(order.len());
+        for id in order {
+            let mut e = ev.remove(&id).unwrap_or_default();
+            if !have_cos.contains(&id) {
+                // lexical-only anchor: its cosine is below the vector top-k, compute it
+                e.cos = cosine(&qemb, &self.store.embedding(&id).unwrap_or_default()) as f64;
+            }
+            e.cos_rel = e.cos.max(0.0) / max_cos;
+            e.cov_rel = e.coverage / max_cov;
+            e.cos_z = (e.cos - mean) / sd;
+            e.cos_zrel = e.cos_z.clamp(Z_MIN, Z_MAX).max(0.0) / max_z;
+            e.reason_match = wants_reason && mems.get(&id).is_some_and(|m| screen::explains(&m.content) || screen::is_reason_note(&m.content) || m.why.is_some());
+            out.push(Candidate { prior: relevance_prior(&e, &w), id, ev: e });
+        }
+        out.sort_by(|a, b| b.prior.partial_cmp(&a.prior).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
+        Ok(out)
+    }
+
     pub async fn recall(&self, ctx: &Ctx, req: RecallReq) -> Result<RecallOut> {
         let q = req.query.trim();
         let k = if req.k == 0 { self.cfg.inject.max_recall_notes } else { req.k };
@@ -518,60 +650,33 @@ impl Engine {
             return Ok(out);
         }
 
-        // ---- anchors: lexical (BM25 over stems / CJK unigrams / bilingual concepts) + vector
-        // asymmetric embedders (E5) need the query prefix for queries
-        let qemb = self.embedder.embed_query(q).await?;
-        let lex = self.store.lex_search(q, &scopes, ANCHOR_K);
-        let vs = self.store.vec_search(&qemb, &scopes, ANCHOR_K, false);
-        if lex.is_empty() && vs.is_empty() {
+        // ---- anchors: lexical (BM25 over stems / CJK unigrams / bilingual concepts) + vector, ranked by the prior
+        let topk = req.depth == Depth::TopK;
+        let anchor_k = if topk { ANCHOR_K.max(k) } else { ANCHOR_K };
+        let cands = self.candidates(q, &scopes, anchor_k).await?;
+        if cands.is_empty() {
             out.mode = "empty".into();
             out.needed = true;
             return Ok(out);
         }
-        let max_lex = lex.first().map(|h| h.score).unwrap_or(0.0).max(1e-9);
-        let max_cos = vs.first().map(|x| x.1 as f64).unwrap_or(0.0).max(1e-9);
+        for c in cands.iter().take(20) {
+            tracing::trace!(target: "unimem::evidence", query = q, id = c.id.as_str(), prior = c.prior, evidence = ?c.ev);
+        }
         let wants_reason = screen::asks_why(q);
-        let mut ev: HashMap<String, Evidence> = HashMap::new();
-        for h in &lex {
-            let e = ev.entry(h.id.clone()).or_default();
-            e.coverage = h.coverage;
-            e.lex_rel = h.score / max_lex;
-        }
-        for (id, c) in &vs {
-            let e = ev.entry(id.clone()).or_default();
-            e.cos = (*c as f64).max(0.0);
-            e.cos_rel = e.cos / max_cos;
-        }
-        let ids: Vec<String> = ev.keys().cloned().collect();
-        let mut mems: HashMap<String, Memory> = self.store.get_memories(&ids).into_iter().map(|m| (m.id.clone(), m)).collect();
-        let max_cov = ev.values().map(|e| e.coverage).fold(0.0, f64::max).max(1e-9);
-        let mut prior: Vec<(String, f64)> = vec![];
-        for (id, e) in ev.iter_mut() {
-            e.cov_rel = e.coverage / max_cov;
-            let Some(m) = mems.get(id) else { continue };
-            if e.cos == 0.0 {
-                e.cos = cosine(&qemb, &self.store.embedding(id).unwrap_or_default()).max(0.0) as f64;
-                e.cos_rel = e.cos / max_cos;
-            }
-            e.reason_match = wants_reason && (screen::explains(&m.content) || screen::is_reason_note(&m.content) || m.why.is_some());
-            prior.push((id.clone(), relevance_prior(e)));
-        }
-        prior.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then_with(|| a.0.cmp(&b.0)));
-        for (id, p) in prior.iter().take(20) {
-            tracing::trace!(target: "unimem::evidence", query = q, id = id.as_str(), prior = *p, evidence = ?ev[id]);
-        }
         let multihop = screen::looks_multihop(q);
         out.mode = if multihop { "full".into() } else { "lite".into() };
 
-        // ---- one batched System-One call: gate + relevance of the top candidates + routing
-        let top: Vec<(String, f64)> = prior.into_iter().take(SCORE_K).collect();
-        mems.retain(|id, _| top.iter().any(|t| &t.0 == id));
+        // ---- one batched System-One call: gate + relevance of the top candidates + routing. In ranking mode the
+        // candidates beyond `SCORE_K` keep their prior (a model-backed decider only judges the head).
+        let n_top = if topk { SCORE_K.max(k) } else { SCORE_K };
+        let top: Vec<(String, f64)> = cands.iter().take(n_top).map(|c| (c.id.clone(), c.prior)).collect();
+        let mems: HashMap<String, Memory> = self.store.get_memories(&top.iter().map(|t| t.0.clone()).collect::<Vec<_>>()).into_iter().map(|m| (m.id.clone(), m)).collect();
         let mut qs: Questions = vec![];
         if req.passive {
             qs.push(("gate".into(), Question::noul("Would answering this message benefit from long-term memory about this user or project (past decisions, preferences, conventions, gotchas, history)?", screen::gate_prior(q))));
         }
         let mut notes_state = vec![];
-        for (i, (id, p)) in top.iter().enumerate() {
+        for (i, (id, p)) in top.iter().enumerate().take(SCORE_K) {
             if let Some(m) = mems.get(id) {
                 notes_state.push(json!({"key": format!("n{i}"), "note": m.content, "why": m.why, "date": fmt_date(m.created_at)}));
                 qs.push((format!("rel_n{i}"), Question::noul(format!("Is note n{i} useful for answering the query?"), *p)));
@@ -598,8 +703,12 @@ impl Engine {
         out.needed = true;
 
         let mut scored: Vec<(String, f64, String)> = vec![];
-        for (i, (id, _)) in top.iter().enumerate() {
-            if let Some(x) = a.get(&format!("rel_n{i}")) {
+        for (i, (id, p)) in top.iter().enumerate() {
+            if i >= SCORE_K {
+                if mems.contains_key(id) {
+                    scored.push((id.clone(), *p, "anchor".into()));
+                }
+            } else if let Some(x) = a.get(&format!("rel_n{i}")) {
                 scored.push((id.clone(), x.p, "anchor".into()));
             }
         }
@@ -723,7 +832,12 @@ impl Engine {
         }
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then_with(|| a.0.cmp(&b.0)));
         let best = scored.first().map(|s| s.1).unwrap_or(0.0);
-        let mut keep: Vec<(String, f64, String)> = scored.iter().filter(|s| s.1 >= T_RELEVANT && s.1 >= best * KEEP_RATIO).take(k).cloned().collect();
+        let mut keep: Vec<(String, f64, String)> = if topk {
+            // ranking mode: the caller asked for k notes; return the k best with their scores
+            scored.iter().take(k).cloned().collect()
+        } else {
+            scored.iter().filter(|s| s.1 >= T_RELEVANT && s.1 >= best * KEEP_RATIO).take(k).cloned().collect()
+        };
         // Agent-initiated recall: surface the best weak candidate instead of nothing (flagged insufficient below).
         if keep.is_empty() && !req.passive {
             keep = scored.iter().filter(|s| s.1 >= T_WEAK).take(1).cloned().collect();
@@ -737,7 +851,7 @@ impl Engine {
                     content: m.content.clone(),
                     why: m.why.clone(),
                     date: fmt_date(m.created_at),
-                    p: (*p * 100.0).round() / 100.0,
+                    p: (*p * 1000.0).round() / 1000.0,
                     via: via.clone(),
                     superseded: m.superseded_by.is_some() || stale.contains(id),
                 });
@@ -793,16 +907,20 @@ impl Engine {
     /// Render notes one per line, each capped at `RENDER_CONTENT_CHARS` / `RENDER_WHY_CHARS`, stopping before the
     /// total estimate exceeds `max_tokens`. Returns the text and the (id, tokens) of the notes rendered.
     pub fn render_hits_budget(&self, hits: &[Hit], ctx: &Ctx, max_tokens: usize) -> (String, Vec<(String, usize)>) {
-        self.render_lines(hits, ctx, max_tokens, false)
+        self.render_lines(hits, ctx, max_tokens, false, false)
     }
 
-    /// Like [`Self::render_hits_budget`]; `full` keeps long content (the agent asked for these notes).
-    pub fn render_lines(&self, hits: &[Hit], ctx: &Ctx, max_tokens: usize, full: bool) -> (String, Vec<(String, usize)>) {
+    /// Like [`Self::render_hits_budget`]; `full` keeps long content (the agent asked for these notes), `scores`
+    /// prefixes each note with its relevance score (ranking mode).
+    pub fn render_lines(&self, hits: &[Hit], ctx: &Ctx, max_tokens: usize, full: bool, scores: bool) -> (String, Vec<(String, usize)>) {
         let mut out = String::new();
         let mut used = 0usize;
         let mut ids = vec![];
         for h in hits {
-            let line = self.render_one(h, ctx, full || !self.cfg.inject.budgets);
+            let mut line = self.render_one(h, ctx, full || !self.cfg.inject.budgets);
+            if scores {
+                line = format!("{:.3} {line}", h.p);
+            }
             let t = crate::budget::estimate_tokens(&line);
             if used + t > max_tokens {
                 continue;
@@ -907,6 +1025,11 @@ impl Engine {
         }
         c.insert(k, v);
         v
+    }
+
+    /// The relevance-prior weights for this engine's embedder.
+    pub fn prior_weights(&self) -> PriorWeights {
+        PriorWeights::for_embedder(&self.embedder.id())
     }
 
     /// Cosine on a common scale: anisotropic embedders (E5) put unrelated texts at 0.75–0.85, so the code-side

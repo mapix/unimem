@@ -42,7 +42,7 @@ How the e5 embedder was run:
 - e5 vectors were precomputed by `embed_e5.py` (Python onnxruntime 1.23.2) and cached.
 - The **Rust `onnx` embedder** in `src/embed.rs` (cargo feature `onnx`, using the `ort` 2.0.0-rc.10 crate with `load-dynamic` plus the `tokenizers` crate) loads the same model through the Python wheel's `libonnxruntime.so`.
 - It reproduces the cache (`results/onnx_parity.json`): minimum cosine with the Python vectors is 0.99999988 over 203 passages and 51 queries.
-- The Rust path runs at about 100–150 short passages/s on 4 cores. It uses `"passage: "` for notes and `"query: "` for recall queries via the new `Embedder::embed_query`. `src/engine.rs` (not changed here) still embeds recall queries with `embed_one`. The cached embedder used in this bench routes them to the query cache, but in production with `kind = "onnx"` recall queries would get the passage prefix. **TODO for the engine owner:** call `embed_query` in `Engine::recall`.
+- The Rust path runs at about 100–150 short passages/s on 4 cores. It uses `"passage: "` for notes and `"query: "` for recall queries via `Embedder::embed_query`. Since v0.4, `Engine::recall` (and in v0.5 `Engine::candidates`) embeds queries with `embed_query`.
 - `ort`'s own runtime download (`cdn.pyke.io`) is not needed and was not used.
 
 ### Protocol
@@ -310,3 +310,181 @@ ORT_DYLIB_PATH=<site-packages>/onnxruntime/capi/libonnxruntime.so.1.23.2
 ```
 
 then set `[embedder] kind = "onnx"` and `model = "<dir with model.onnx + tokenizer.json>"`.
+
+## 7. v0.5: embedder-calibrated prior, ranking depth, e5 as a production embedder
+
+Results are in `bench/results/v0.5/`:
+
+- `std/tables.test.md`: headline, test split.
+- `std/tables.md`: full set.
+- `std/significance.txt`
+- `e1-heldout2-{hash,e5}/`
+- `e1_significance.txt`
+- `prior_fit.json`
+
+The baseline run files (bm25*, hash-dense, e5-small, hybrid-rrf) are the v0.4 ones; their code did not change. All unimem systems were re-run.
+
+### 7.1 What changed
+
+1. **Relevance prior on an embedder-independent scale.** `Engine::candidates` in `src/engine.rs` computes the features over BM25 top-n ∪ cosine top-n.
+   - The raw cosine is replaced by **`cos_z`**: a z-score of the note's cosine against the distribution of the query's cosine over every live note in the searched scopes. `Store::vec_search_stats` computes it in the same pass as the search.
+   - **`cos_zrel`**: `cos_z` relative to the best `cos_z`.
+   - **`rrf`**: an RRF term of the BM25 and cosine ranks, k = 60, scaled so that rank 1 in both lists gives 1.
+   - The lexical features (coverage, lex_rel, cov_rel) and the reason match are unchanged.
+   - E5 cosines of unrelated texts sit at 0.75–0.85 and hash cosines near 0. After z-scoring, both mean "standard deviations above this query's typical note".
+2. **Weights per embedder family, fitted on dev data only.**
+   - Fitted by `bench/std/fit_prior.py`: `PRIOR_HASH` for `hash*`, and `PRIOR_DENSE` for `onnx:*` / `openai:*`.
+   - Method: logistic regression with every source, and every query within a source, weighted equally, L2 = 1e-3.
+   - Afterwards the intercept alone is refitted on devmem + heldout. That keeps the scale on which `T_RELEVANT`, `KEEP_RATIO` and `T_SUFFICIENT` were set, so those were not re-tuned.
+   - Dense fit: `cos_z` 0.69 and `cos_zrel` 1.47, against `lex_rel` 1.27. Hash fit: `cos_z` 0.20 and `cos_zrel` 0.47, against `lex_rel` 1.84.
+   - The fit agrees with the v0.4 finding that the old prior under-weighted a good embedder.
+   - **Split:** a LongMemEval question is dev if `sha256(question_id)[0]` is even, otherwise test (`split_of`). That gives 216 dev and 203 test questions.
+   - Fit inputs, with candidate features and gold labels:
+     - `unimem-std-bench evidence`, which only ever writes dev questions;
+     - `UNIMEM_BENCH_EVIDENCE` on E1 for devmem / heldout.
+   - LoCoMo and heldout2 were never used for fitting. No threshold, k or feature was tuned on a test split.
+3. **Recall depth.** `RecallReq.depth` is either `Depth::Adaptive` (the default: the cut-off, used for passive injection) or `Depth::TopK`.
+   - `TopK` returns the k best by score, with scores. Candidates beyond the 14 that the decider judges keep their prior.
+   - Uses: the `unimem_recall` tool with an explicit `k` (it prints the scores), `unimem recall -k N`, the UI search, and `/api/recall` with `"depth": "top_k"`.
+4. **e5 in production.**
+   - Config: `[embedder] kind = "onnx"`, `model = <dir>`, which defaults to `<data_dir>/models/multilingual-e5-small`.
+   - New options `ort_dylib` (or `ORT_DYLIB_PATH`) and `threads`.
+   - `unimem models download e5-small` fetches the official ONNX export (sha256-pinned `model.onnx`) and prints the config. `unimem models list` shows what is installed.
+   - The fallback to hash is reported in all cases: missing model, missing runtime, or a build without the feature.
+   - Recall uses `embed_query`. The v0.4 per-embedder dup thresholds are still in place, and a test covers them: `near_dup_cos` 0.95 for e5 plus a lexical-skeleton check, and the `cos_baseline` 0.75 calibration.
+   - Verified end to end through the CLI with `kind = "onnx"`, and through E1 with `UNIMEM_BENCH_EMBEDDER=onnx`.
+   - The bench now shares one loaded model across its engines. Before that change, E1 with e5 ran out of memory at 3.8 GB.
+
+### 7.2 Dev-split fit check (`prior_fit.json`, candidate pool = anchors, R_all)
+
+| source (dev) | v0.4 prior R@5 / R@10 | RRF only | v0.5 prior |
+|---|---|---|---|
+| LME session, e5 | 0.861 / 0.954 | 0.935 / 0.963 | 0.931 / 0.982 |
+| LME turn, e5 | 0.690 / 0.796 | 0.736 / 0.847 | 0.755 / 0.866 |
+| devmem, e5 | 0.810 / 0.899 | 0.832 / 0.894 | 0.838 / 0.899 |
+| LME turn, hash | 0.694 / 0.778 | 0.639 / 0.722 | 0.694 / 0.768 |
+| heldout, hash | 0.775 / 0.820 | 0.770 / 0.809 | 0.775 / 0.815 |
+
+With hash, the refit essentially reproduces v0.4: the dev data does not reward the hash cosine. RRF alone is worse than v0.4 with hash, because hash-dense is a weak second list.
+
+### 7.3 Test split (headline)
+
+LongMemEval: 203 test questions. LoCoMo: 1,536 questions in categories 1–4, all of it test. Arrows show v0.4 → v0.5 on the same questions.
+
+| system | LME session R@5 | LME session R@10 | LME turn R@5 | LME turn R@10 | LoCoMo R@5 | LoCoMo R@10 | notes/query |
+|---|---|---|---|---|---|---|---|
+| bm25 | 0.847 | 0.911 | 0.635 | 0.729 | 0.470 | 0.553 | ranking |
+| e5-small | **0.921** | 0.966 | 0.650 | 0.813 | 0.482 | 0.569 | ranking |
+| hybrid-rrf | 0.906 | 0.966 | 0.690 | 0.828 | 0.551 | 0.629 | ranking |
+| unimem-prior-hash | 0.837 → 0.847 | 0.901 → 0.897 | 0.660 → 0.655 | 0.749 → 0.749 | 0.543 → 0.540 | 0.620 → 0.618 | ranking |
+| **unimem-prior-e5** | 0.833 → 0.901 | 0.921 → **0.975** | 0.650 → **0.709** | 0.768 → **0.852** | 0.542 → **0.595** | 0.619 → **0.663** | ranking |
+| unimem-topk-e5 (`recall`, `Depth::TopK`, k = 50) | 0.901 | **0.975** | **0.709** | **0.852** | **0.595** | **0.663** | 47–50 |
+| unimem-topk-hash | 0.847 | 0.897 | 0.650 | 0.744 | 0.538 | 0.616 | 47–50 |
+| unimem-e5 (`recall`, adaptive) | 0.616 → 0.650 | 0.616 → 0.650 | 0.453 → 0.547 | 0.463 → 0.567 | 0.483 → 0.510 | 0.504 → 0.516 | 1.6–2.9 |
+| unimem-hash (`recall`, adaptive) | 0.552 → 0.527 | 0.552 → 0.527 | 0.433 → 0.429 | 0.433 → 0.433 | 0.471 → 0.459 | 0.483 → 0.464 | 1.6–2.6 |
+| unimem-write-e5 (write path + adaptive) | 0.473 | 0.473 | 0.468 | 0.488 | 0.490 | 0.497 | 1.5–2.6 |
+
+On the full set (419 questions), unimem-prior-e5 reaches:
+
+- session R@10 0.979, against 0.971 for hybrid;
+- turn R@5 0.733, against 0.721;
+- turn R@10 0.862, against 0.838.
+
+Per question type, test-split turn R@10:
+
+| type | hybrid | unimem-topk-e5 | unimem-e5 (adaptive) |
+|---|---|---|---|
+| multi-session | 0.673 | 0.692 | 0.404 |
+| single-session-preference | 0.647 | 0.706 | 0.471 |
+| temporal-reasoning | 0.848 | 0.848 | 0.458 |
+
+Paired bootstrap against hybrid-rrf, test split (`bench/std/significance_v05.py`; 2000 resamples, 95% CI):
+
+| comparison | metric | Δ | 95% CI | win / loss |
+|---|---|---|---|---|
+| unimem-topk-e5 − hybrid | LME session R@10 | +0.010 | [−0.010, +0.030] | 3 / 1 |
+| unimem-topk-e5 − hybrid | LME session R@5 | −0.005 | [−0.039, +0.025] | 5 / 6 |
+| unimem-topk-e5 − hybrid | LME turn R@10 | +0.025 | [+0.000, +0.054] | 6 / 1 |
+| unimem-topk-e5 − hybrid | LME turn R@5 | +0.020 | [−0.020, +0.059] | 10 / 6 |
+| unimem-topk-e5 − hybrid | LoCoMo R@10 | **+0.035** | **[+0.022, +0.047]** | 121 / 53 |
+| unimem-topk-e5 − hybrid | LoCoMo R@5 | **+0.044** | **[+0.031, +0.057]** | 134 / 43 |
+| unimem-prior-hash − hybrid | LME turn R@10 | **−0.079** | [−0.123, −0.034] | 3 / 19 |
+| unimem-prior-hash − hybrid | LME session R@10 | **−0.069** | [−0.103, −0.034] | 0 / 14 |
+| unimem-prior-hash − hybrid | LoCoMo R@10 | −0.011 | [−0.027, +0.005] | 122 / 152 |
+| unimem-e5 (adaptive) − hybrid | LME turn R@10 | −0.261 | [−0.320, −0.202] | 0 / 53 |
+| unimem-prior-e5 − e5-small | LME turn R@10 | +0.039 | [+0.010, +0.074] | 10 / 2 |
+| unimem-prior-hash − bm25 | LME turn R@10 | +0.020 | [−0.015, +0.054] | 9 / 5 |
+
+For LME turn R@10, the lower bound of +0.000 means the bootstrap distribution touches 0 but does not cross it. Treat it as borderline.
+
+### 7.4 Own benchmark E1, heldout2 (out of sample, 218 answerable queries)
+
+`unimem-top5` is the new ranking-mode system (`Depth::TopK`, k = 5). It runs at the same depth as the top-5 baselines.
+
+| system | embedder | R@1 | R@5 | MRR | notes/q | precision | scope leak | stale returned | rejected-note returned | cross-harness R@5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| unimem-full (adaptive) | hash | 0.555 | 0.693 | 0.617 | 1.65 | **0.424** | 2.5% | **16.3%** | **6.2%** | 0.671 |
+| unimem-top5 | hash | 0.555 | **0.784** | **0.648** | 5 | 0.157 | 17.8% | 34.9% | 23.6% | **0.786** |
+| vector-top5-cwd | hash | 0.390 | 0.670 | 0.506 | 5 | 0.134 | 8.7% | 58.1% | 45.5% | 0.664 |
+| unimem-full (adaptive) | e5 | 0.606 | 0.693 | 0.643 | 1.50 | **0.470** | 1.2% | 18.6% | **5.0%** | 0.664 |
+| unimem-top5 | e5 | **0.610** | **0.803** | **0.684** | 5 | 0.161 | 16.9% | 34.9% | 29.8% | **0.786** |
+| vector-top5-cwd | e5 | 0.514 | 0.743 | 0.605 | 5 | 0.149 | 2.1% | 55.8% | 56.6% | 0.736 |
+| bm25-top5-cwd | – | 0.413 | 0.615 | 0.497 | 4.05 | 0.152 | 3.3% | 55.8% | 37.2% | 0.600 |
+
+Paired bootstrap, per-query R@5:
+
+| comparison | hash | e5 |
+|---|---|---|
+| unimem-top5 − vector-top5-cwd | **+0.115** [+0.069, +0.165] | **+0.060** [+0.014, +0.110] |
+| unimem-top5 − bm25-top5-cwd | **+0.170** [+0.115, +0.225] | **+0.188** [+0.128, +0.243] |
+| unimem-full − vector-top5-cwd | +0.023 [−0.032, +0.078] | −0.050 [−0.106, +0.005] |
+
+The adaptive v0.4 → v0.5 change with hash is R@5 0.688 → 0.693, i.e. unchanged; the hash prior barely moved.
+
+With e5, adaptive recall raises R@1 (0.555 → 0.606) but keeps returning about 1.5 notes. Plain e5 cosine top-5 therefore beats it on R@5 (−0.050, n.s.). At equal depth, unimem wins.
+
+The e5 write path on heldout2, using the v0.4 per-embedder thresholds:
+
+- duplicate recall 6/23 (hash 4/23);
+- 1 false duplicate;
+- supersede 16/25 correct, precision 0.80 (hash 0.89);
+- 0/12 distractor errors.
+
+There is no e5 over-merge of the kind §4.4 found on raw chat turns. e5 merges far fewer raw turns than before the v0.4 fix: 433 of 5,882 LoCoMo turns (was 2,662) and 8,137 of 102k LongMemEval turns (was 22,763). The hash embedder merges 106 and 3,978.
+
+### 7.5 Reading the results honestly
+
+1. **With e5, unimem's ranking is now at least as good as BM25 + e5 RRF.**
+   - On LoCoMo it is significantly better.
+   - On LongMemEval it is tied (session) or ahead but borderline (turn).
+   - In v0.4 the same ranker was significantly below hybrid on LongMemEval (−0.033 / −0.055).
+   - What changed is only how the cosine enters the prior (z-score + RRF) and the dense-family weights. Both were fitted on dev questions.
+   - The extra gain over plain RRF comes from the lexical coverage features. They help most on LoCoMo, where many questions name a person and an event.
+2. **With the offline hash embedder, unimem still loses to hybrid-rrf on LongMemEval:** −0.07 to −0.08 R@10, significant.
+   - This is not a ranker problem. unimem-prior-hash ties stemmed BM25 (+0.020 turn, n.s.).
+   - Hybrid-rrf contains a 118M-parameter transformer, while hash2-512 is a feature-hashing bag of words. Paraphrase-heavy types (multi-session, single-session-preference) need the transformer.
+   - On LoCoMo the hash ranker is within noise of hybrid (−0.011).
+   - Recommendation: use `kind = "onnx"` with e5 whenever about 500 MB of disk and about 1 GB of RAM are acceptable.
+3. **The adaptive cut-off remains the main reason `engine.recall` scores low on Recall@10.** unimem-e5 returns 1.6–2.9 notes, so on test turns it reaches R@10 0.567 against 0.852 for the same engine at `Depth::TopK`.
+   - That is the intended trade-off for passive injection: precision 0.47 vs 0.15 on heldout2, and stale notes 16–19% vs 35%.
+   - The agent tool now gets ranking mode when it asks for k. `topk` equals the pure prior ranking to the third decimal, so the decider round-trip and the stale demotion cost nothing measurable here.
+4. **What ranking mode gives up on heldout2:**
+   - scope leak 17% (vs 1–3% adaptive);
+   - stale returned 35%;
+   - rejected-label notes 24–30%.
+   These come from slots 2–5 and from scope widening by named projects. They are the reason injection stays adaptive.
+5. **Limits of the evidence:**
+   - The dev/test split halves LongMemEval, so test CIs are about √2 wider than in §4.
+   - The per-family weights were fitted with e5 only. `openai:*` embedders get the same dense weights untested.
+   - LongMemEval_M is still not run, because of disk space.
+   - The E1 write-path screen failures listed in FINAL.md §1.5 (injection 1/7, status 1/6) are unchanged; v0.5 does not touch the write screens.
+
+Reproduce:
+
+- Fit inputs: `unimem-std-bench evidence --cache C --dataset lme --gran {session,turn} --embedder {hash,e5} --out F --budget S`, plus `UNIMEM_BENCH_EVIDENCE=F unimem-bench e1 --data bench/data/{devmem,heldout}.json`.
+- Fit: `python3 -I bench/std/fit_prior.py bench/results/v0.5/prior_fit.json <evidence files>`.
+- Runs: `UNIMEM_STD_RUNS=runs-v05 unimem-std-bench run …` with systems `unimem-{prior,topk}-{hash,e5}`, `unimem-{hash,e5}` and `unimem-write-{hash,e5}`.
+- Reports: `report --split test` and `report --split all`.
+- Significance: `python3 -I bench/std/significance_v05.py C runs-v05`.
+- E1 with e5: `ORT_DYLIB_PATH=… UNIMEM_BENCH_EMBEDDER=onnx UNIMEM_BENCH_EMBEDDER_MODEL=<dir> unimem-bench e1 --data bench/data/heldout2.json --out …`.
+- E1 paired bootstrap: `python3 -I bench/std/e1_significance.py`.

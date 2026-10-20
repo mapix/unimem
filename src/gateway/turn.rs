@@ -237,7 +237,7 @@ impl Turn {
         if cfg.recall && cap >= 64 {
             let budget = std::time::Duration::from_millis(cfg.recall_budget_ms);
             let k = cfg.max_recall_notes;
-            let fut = st.engine.recall(ctx, RecallReq { query: truncate_chars(prompt, 2000), project: None, k: k + 3, passive: true });
+            let fut = st.engine.recall(ctx, RecallReq { query: truncate_chars(prompt, 2000), project: None, k: k + 3, passive: true, ..Default::default() });
             match tokio::time::timeout(budget, fut).await {
                 Ok(Ok(out)) => {
                     let notes: Vec<_> = out.notes.into_iter().filter(|n| !skip.contains(&n.id)).take(k).collect();
@@ -296,7 +296,7 @@ impl Turn {
             let paths: Vec<String> = screen::paths_in(&format!("{results}\n{command}")).into_iter().take(3).collect();
             let query = format!("{}\n{}\n{}", errors.iter().take(3).cloned().collect::<Vec<_>>().join("\n"), paths.join(" "), truncate_chars(command.trim(), 200));
             let budget = std::time::Duration::from_millis(cfg.recall_budget_ms);
-            let fut = st.engine.recall(ctx, RecallReq { query: query.clone(), project: None, k: 5, passive: true });
+            let fut = st.engine.recall(ctx, RecallReq { query: query.clone(), project: None, k: 5, passive: true, ..Default::default() });
             if let Ok(Ok(out)) = tokio::time::timeout(budget, fut).await {
                 let notes: Vec<_> = out.notes.into_iter().filter(|n| !pskip.contains(&n.id) && n.p >= 0.15 && shares_rare_token(st, &query, &n.content)).take(2).collect();
                 if !notes.is_empty() {

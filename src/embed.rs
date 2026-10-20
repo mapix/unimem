@@ -33,6 +33,29 @@ pub trait Embedder: Send + Sync {
     }
 }
 
+/// One loaded model shared by several engines (a transformer embedder is hundreds of MB; load it once).
+#[async_trait]
+impl Embedder for std::sync::Arc<dyn Embedder> {
+    fn id(&self) -> String {
+        (**self).id()
+    }
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        (**self).embed(texts).await
+    }
+    async fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        (**self).embed_one(text).await
+    }
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
+        (**self).embed_query(text).await
+    }
+    fn near_dup_cos(&self) -> f32 {
+        (**self).near_dup_cos()
+    }
+    fn cos_baseline(&self) -> f32 {
+        (**self).cos_baseline()
+    }
+}
+
 /// Default near-duplicate cosine by embedder id (override: `embedder.near_dup_cos`).
 pub fn near_dup_for(id: &str) -> f32 {
     let id = id.to_lowercase();
@@ -51,6 +74,37 @@ pub fn cos_baseline_for(id: &str) -> f32 {
         0.75
     } else {
         0.0
+    }
+}
+
+/// A downloadable model for the `onnx` embedder (`unimem models download <name>`).
+pub struct ModelSpec {
+    pub name: &'static str,
+    /// directory name under `<data_dir>/models/` (contains "e5", which selects the E5 prefixes and calibration)
+    pub dir: &'static str,
+    pub base_url: &'static str,
+    /// (file, sha256 or "" when not pinned)
+    pub files: &'static [(&'static str, &'static str)],
+}
+
+/// intfloat/multilingual-e5-small, official ONNX export (118M parameters, 384-d, ~100 languages incl. Chinese).
+pub const E5_SMALL: ModelSpec = ModelSpec {
+    name: "e5-small",
+    dir: "multilingual-e5-small",
+    base_url: "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx",
+    files: &[
+        ("model.onnx", "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"),
+        ("tokenizer.json", ""),
+        ("config.json", ""),
+        ("special_tokens_map.json", ""),
+        ("tokenizer_config.json", ""),
+    ],
+};
+
+pub fn model_spec(name: &str) -> Option<&'static ModelSpec> {
+    match name {
+        "e5-small" | "multilingual-e5-small" | "me5s" => Some(&E5_SMALL),
+        _ => None,
     }
 }
 
@@ -181,11 +235,22 @@ pub mod onnx {
 
     impl OnnxEmbedder {
         pub fn load(dir: &Path, threads: usize) -> Result<Self> {
+            Self::load_with(dir, threads, None)
+        }
+
+        /// Like [`Self::load`]; `ort_dylib` overrides `$ORT_DYLIB_PATH`.
+        pub fn load_with(dir: &Path, threads: usize, ort_dylib: Option<&str>) -> Result<Self> {
             let model = if dir.join("model.onnx").exists() { dir.join("model.onnx") } else { dir.join("onnx/model.onnx") };
             let tok = if dir.join("tokenizer.json").exists() { dir.join("tokenizer.json") } else { dir.join("onnx/tokenizer.json") };
+            if !model.exists() {
+                return Err(anyhow!("no model.onnx in {} (run `unimem models download e5-small`)", dir.display()));
+            }
             let tokenizer = tokenizers::Tokenizer::from_file(&tok).map_err(|e| anyhow!("tokenizer {}: {e}", tok.display()))?;
-            if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
-                let _ = ort::init_from(p).commit();
+            match ort_dylib.map(String::from).filter(|p| !p.is_empty()).or_else(|| std::env::var("ORT_DYLIB_PATH").ok()) {
+                Some(p) => {
+                    let _ = ort::init_from(p).commit();
+                }
+                None => return Err(anyhow!("ONNX Runtime library not configured: set embedder.ort_dylib or ORT_DYLIB_PATH to libonnxruntime")),
             }
             let session = ort::session::Session::builder()
                 .and_then(|b| b.with_intra_threads(threads.max(1)))
@@ -280,16 +345,27 @@ pub mod onnx {
     }
 }
 
+/// Build the configured embedder. An unusable configuration falls back to the hash embedder with a warning; the
+/// store records the embedder id, so a later switch is reported (`unimem reembed`).
 pub fn build(cfg: &EmbedderCfg) -> Box<dyn Embedder> {
     match cfg.kind.as_str() {
         #[cfg(feature = "onnx")]
-        "onnx" if !cfg.model.is_empty() => match onnx::OnnxEmbedder::load(&crate::util::expand_tilde(&cfg.model), 4) {
-            Ok(e) => Box::new(e),
-            Err(e) => {
-                tracing::warn!("onnx embedder unavailable ({e}); falling back to hash");
-                Box::new(HashEmbedder { dim: cfg.dim.max(64) })
+        "onnx" => {
+            let dir = crate::util::expand_tilde(if cfg.model.is_empty() { "~/.unimem/models/multilingual-e5-small" } else { &cfg.model });
+            let threads = if cfg.threads == 0 { 4 } else { cfg.threads };
+            match onnx::OnnxEmbedder::load_with(&dir, threads, Some(&cfg.ort_dylib)) {
+                Ok(e) => Box::new(e),
+                Err(e) => {
+                    tracing::warn!("onnx embedder unavailable ({e}); falling back to hash");
+                    Box::new(HashEmbedder { dim: cfg.dim.max(64) })
+                }
             }
-        },
+        }
+        #[cfg(not(feature = "onnx"))]
+        "onnx" => {
+            tracing::warn!("embedder.kind = \"onnx\" needs a build with `--features onnx`; falling back to hash");
+            Box::new(HashEmbedder { dim: cfg.dim.max(64) })
+        }
         "openai" if !cfg.base_url.is_empty() && !cfg.model.is_empty() => Box::new(OpenAiEmbedder {
             client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap(),
             base_url: cfg.base_url.clone(),

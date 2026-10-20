@@ -42,7 +42,7 @@ use std::time::Instant;
 use unimem::config::Config;
 use unimem::decide::ChainDecider;
 use unimem::embed;
-use unimem::engine::{Engine, RecallReq, WriteOutcome, WriteReq};
+use unimem::engine::{Depth, Engine, RecallReq, WriteOutcome, WriteReq};
 use unimem::gateway::{self, sse, AppState};
 use unimem::project::{scope_of, Resolver};
 use unimem::store::{cosine, Store};
@@ -65,15 +65,27 @@ fn bench_config() -> Result<Config> {
     if let Ok(k) = std::env::var("UNIMEM_BENCH_EMBEDDER") {
         cfg.embedder.kind = k;
     }
+    if let Ok(m) = std::env::var("UNIMEM_BENCH_EMBEDDER_MODEL") {
+        cfg.embedder.model = m;
+    }
     Ok(cfg)
 }
 
+/// The embedder of a config, built once per distinct embedder config and shared by every engine of the run (a
+/// transformer model would otherwise be loaded once per engine).
+fn shared_embedder(cfg: &Config) -> Arc<dyn embed::Embedder> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, Arc<dyn embed::Embedder>>>> = std::sync::OnceLock::new();
+    let key = serde_json::to_string(&cfg.embedder).unwrap_or_default();
+    let mut c = CACHE.get_or_init(Default::default).lock();
+    c.entry(key).or_insert_with(|| Arc::from(embed::build(&cfg.embedder))).clone()
+}
+
 fn make_engine(cfg: &Config, store: Store) -> Engine {
-    Engine::with_parts(cfg.clone(), store, embed::build(&cfg.embedder), ChainDecider::from_config(&cfg.decider))
+    Engine::with_parts(cfg.clone(), store, Box::new(shared_embedder(cfg)), ChainDecider::from_config(&cfg.decider))
 }
 
 fn config_info(cfg: &Config) -> Value {
-    json!({"decider": ChainDecider::from_config(&cfg.decider).describe(), "embedder": embed::build(&cfg.embedder).id()})
+    json!({"decider": ChainDecider::from_config(&cfg.decider).describe(), "embedder": shared_embedder(cfg).id()})
 }
 
 struct TempDir(PathBuf);
@@ -544,9 +556,13 @@ fn evaluate(ev: &Ev, outs: &[SysOut]) -> (Value, Vec<Value>) {
 }
 
 async fn run_uni(e: &Engine, m2n: &HashMap<String, String>, c: &Corpus, q: &DQuery, passive: bool) -> Result<SysOut> {
+    run_uni_depth(e, m2n, c, q, passive, Depth::Adaptive).await
+}
+
+async fn run_uni_depth(e: &Engine, m2n: &HashMap<String, String>, c: &Corpus, q: &DQuery, passive: bool, depth: Depth) -> Result<SysOut> {
     let ctx = e.ctx_for(&q.harness, &format!("q-{}", q.id), Some(&c.cwd(&q.at)));
     let t = Instant::now();
-    let out = e.recall(&ctx, RecallReq { query: q.q.clone(), project: None, k: 5, passive }).await?;
+    let out = e.recall(&ctx, RecallReq { query: q.q.clone(), project: None, k: 5, passive, depth }).await?;
     let el = ms(t);
     let mut o = SysOut { sufficient: out.sufficient, ms: el, ..Default::default() };
     for h in &out.notes {
@@ -621,12 +637,27 @@ async fn e1(data: &Path) -> Result<Value> {
     let bm = Bm25::new(&docs);
 
     let mut results: BTreeMap<String, Vec<SysOut>> = BTreeMap::new();
-    let names = ["unimem-full", "unimem-lite", "unimem-passive", "silo-per-harness", "vector-top5", "vector-top5-cwd", "bm25-top5", "bm25-top5-cwd"];
+    let names = ["unimem-full", "unimem-top5", "unimem-lite", "unimem-passive", "silo-per-harness", "vector-top5", "vector-top5-cwd", "bm25-top5", "bm25-top5-cwd"];
     for n in names {
         results.insert(n.to_string(), vec![]);
     }
+    // `UNIMEM_BENCH_EVIDENCE=FILE`: dump the recall candidates' evidence + gold label per query (for fitting the
+    // relevance prior on development data, `bench/std/fit_prior.py`)
+    let mut evid = match std::env::var("UNIMEM_BENCH_EVIDENCE") {
+        Ok(p) => Some(std::fs::File::create(p)?),
+        Err(_) => None,
+    };
     for q in &ds.queries {
+        if let Some(f) = evid.as_mut() {
+            use std::io::Write as _;
+            let ctx = full.ctx_for(&q.harness, &format!("q-{}", q.id), Some(&corpus.cwd(&q.at)));
+            let scopes = full.recall_scopes(&ctx, &q.q, None);
+            let cands = full.candidates(&q.q, &scopes, 30).await?;
+            let rows: Vec<Value> = cands.iter().map(|c| json!({"y": log.m2n.get(&c.id).is_some_and(|n| q.gold.contains(n)) as u8, "ev": c.ev})).collect();
+            writeln!(f, "{}", json!({"qid": q.id, "cat": q.cat, "n_gold": q.gold.len(), "cands": rows}))?;
+        }
         results.get_mut("unimem-full").unwrap().push(run_uni(&full, &log.m2n, &corpus, q, false).await?);
+        results.get_mut("unimem-top5").unwrap().push(run_uni_depth(&full, &log.m2n, &corpus, q, false, Depth::TopK).await?);
         results.get_mut("unimem-lite").unwrap().push(run_uni(&lite, &log.m2n, &corpus, q, false).await?);
         results.get_mut("unimem-passive").unwrap().push(run_uni(&full, &log.m2n, &corpus, q, true).await?);
         let (se, sm) = &silos[&q.harness];
@@ -672,6 +703,7 @@ async fn e1(data: &Path) -> Result<Value> {
             "same_harness_answerable": ds.queries.iter().filter(|q| !q.gold.is_empty() && !ev.cross_harness(q)).count()},
         "systems_description": {
             "unimem-full": "unimem engine, agent-initiated recall (unimem_recall tool, k=5), graph expansion when the query looks multi-hop",
+            "unimem-top5": "unimem full in ranking mode (`Depth::TopK`, k=5: the tool with an explicit k), same depth as the top-5 baselines",
             "unimem-lite": "same database with all graph edges deleted (anchors + scoring only)",
             "unimem-passive": "unimem full with the passive (gateway-injected) gate enabled",
             "silo-per-harness": "unimem full, but one store per harness: notes written in claude-code are invisible to codex and vice versa",
@@ -1194,7 +1226,7 @@ fn last_prompt(msgs: &[Value]) -> Option<String> {
 
 async fn naive_recall(e: &Engine, cwd: &str, session: &str, prompt: &str) -> Result<Option<String>> {
     let ctx = e.ctx_for("claude-code", session, Some(cwd));
-    let out = e.recall(&ctx, RecallReq { query: prompt.to_string(), project: None, k: 5, passive: true }).await?;
+    let out = e.recall(&ctx, RecallReq { query: prompt.to_string(), project: None, k: 5, passive: true, ..Default::default() }).await?;
     Ok((!out.notes.is_empty()).then(|| format!("<memory>\nRelevant notes from long-term memory:\n{}</memory>", e.render_hits(&out.notes, &ctx))))
 }
 
@@ -1231,6 +1263,7 @@ const CONV: &[&str] = &[
     "Thanks, that's all for today.",
 ];
 
+#[allow(clippy::too_many_arguments)]
 async fn converse(
     mode: Mode,
     client: &reqwest::Client,
@@ -2199,11 +2232,11 @@ async fn e4(_root: &Path) -> Result<Value> {
             let at = i % 7;
             let ctx = e.ctx_for("codex", "q", if at == 6 { None } else { Some(dirs[at].as_str()) });
             let t = Instant::now();
-            let out = e.recall(&ctx, RecallReq { query: q.clone(), project: None, k: 5, passive: false }).await?;
+            let out = e.recall(&ctx, RecallReq { query: q.clone(), project: None, k: 5, passive: false, ..Default::default() }).await?;
             rec.push(ms(t));
             returned += out.notes.len();
             let t = Instant::now();
-            let _ = e.recall(&ctx, RecallReq { query: q, project: None, k: 5, passive: true }).await?;
+            let _ = e.recall(&ctx, RecallReq { query: q, project: None, k: 5, passive: true, ..Default::default() }).await?;
             rec_p.push(ms(t));
         }
         let size_live = db_size(&db);
@@ -2295,7 +2328,7 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
         for n in ["unimem-full", "unimem-passive"] {
             s.push_str(&format!("{n} {} ", pctf(&e1["systems"][n]["overall"]["insufficient_on_answerable_rate"])));
         }
-        s.push_str("\n");
+        s.push('\n');
         s.push_str("\n### Recall@5 by category (MRR in parentheses; unanswerable → abstain rate)\n\n| system |");
         for c in CATS {
             s.push_str(&format!(" {c} |"));

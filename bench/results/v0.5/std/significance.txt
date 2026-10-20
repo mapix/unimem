@@ -1,0 +1,120 @@
+test lme-session  session/recall_all@10  unimem-prior-hash  - hybrid-rrf        n= 203 0.897 vs 0.966  d=-0.069 [-0.103, -0.034] w/l 0/14
+test lme-session  session/recall_all@10  unimem-prior-e5    - hybrid-rrf        n= 203 0.975 vs 0.966  d=+0.010 [-0.010, +0.030] w/l 3/1
+test lme-session  session/recall_all@10  unimem-topk-hash   - hybrid-rrf        n= 203 0.897 vs 0.966  d=-0.069 [-0.103, -0.034] w/l 0/14
+test lme-session  session/recall_all@10  unimem-topk-e5     - hybrid-rrf        n= 203 0.975 vs 0.966  d=+0.010 [-0.010, +0.030] w/l 3/1
+test lme-session  session/recall_all@10  unimem-e5          - hybrid-rrf        n= 203 0.650 vs 0.966  d=-0.315 [-0.379, -0.251] w/l 0/64
+test lme-session  session/recall_all@10  unimem-hash        - hybrid-rrf        n= 203 0.527 vs 0.966  d=-0.438 [-0.502, -0.369] w/l 0/89
+test lme-session  session/recall_all@10  unimem-prior-e5    - e5-small          n= 203 0.975 vs 0.966  d=+0.010 [-0.010, +0.030] w/l 3/1
+test lme-session  session/recall_all@10  unimem-prior-hash  - bm25              n= 203 0.897 vs 0.911  d=-0.015 [-0.039, +0.010] w/l 2/5
+test lme-session  session/recall_all@10  unimem-prior-e5    - unimem-prior-hash n= 203 0.975 vs 0.897  d=+0.079 [+0.044, +0.118] w/l 16/0
+test lme-session  session/recall_all@10  unimem-topk-e5     - unimem-prior-e5   n= 203 0.975 vs 0.975  d=+0.000 [+0.000, +0.000] w/l 0/0
+test lme-session  session/recall_all@5   unimem-prior-hash  - hybrid-rrf        n= 203 0.847 vs 0.906  d=-0.059 [-0.099, -0.025] w/l 2/14
+test lme-session  session/recall_all@5   unimem-prior-e5    - hybrid-rrf        n= 203 0.901 vs 0.906  d=-0.005 [-0.039, +0.025] w/l 5/6
+test lme-session  session/recall_all@5   unimem-topk-hash   - hybrid-rrf        n= 203 0.847 vs 0.906  d=-0.059 [-0.099, -0.025] w/l 2/14
+test lme-session  session/recall_all@5   unimem-topk-e5     - hybrid-rrf        n= 203 0.901 vs 0.906  d=-0.005 [-0.039, +0.025] w/l 5/6
+test lme-session  session/recall_all@5   unimem-e5          - hybrid-rrf        n= 203 0.650 vs 0.906  d=-0.256 [-0.320, -0.192] w/l 1/53
+test lme-session  session/recall_all@5   unimem-hash        - hybrid-rrf        n= 203 0.527 vs 0.906  d=-0.379 [-0.448, -0.310] w/l 1/78
+test lme-session  session/recall_all@5   unimem-prior-e5    - e5-small          n= 203 0.901 vs 0.921  d=-0.020 [-0.054, +0.015] w/l 5/9
+test lme-session  session/recall_all@5   unimem-prior-hash  - bm25              n= 203 0.847 vs 0.847  d=+0.000 [-0.034, +0.034] w/l 7/7
+test lme-session  session/recall_all@5   unimem-prior-e5    - unimem-prior-hash n= 203 0.901 vs 0.847  d=+0.054 [+0.020, +0.089] w/l 13/2
+test lme-session  session/recall_all@5   unimem-topk-e5     - unimem-prior-e5   n= 203 0.901 vs 0.901  d=+0.000 [+0.000, +0.000] w/l 0/0
+test lme-turn     turn/recall_all@10     unimem-prior-hash  - hybrid-rrf        n= 203 0.749 vs 0.828  d=-0.079 [-0.123, -0.034] w/l 3/19
+test lme-turn     turn/recall_all@10     unimem-prior-e5    - hybrid-rrf        n= 203 0.852 vs 0.828  d=+0.025 [+0.000, +0.054] w/l 6/1
+test lme-turn     turn/recall_all@10     unimem-topk-hash   - hybrid-rrf        n= 203 0.744 vs 0.828  d=-0.084 [-0.128, -0.039] w/l 3/20
+test lme-turn     turn/recall_all@10     unimem-topk-e5     - hybrid-rrf        n= 203 0.852 vs 0.828  d=+0.025 [+0.000, +0.054] w/l 6/1
+test lme-turn     turn/recall_all@10     unimem-e5          - hybrid-rrf        n= 203 0.567 vs 0.828  d=-0.261 [-0.320, -0.202] w/l 0/53
+test lme-turn     turn/recall_all@10     unimem-hash        - hybrid-rrf        n= 203 0.433 vs 0.828  d=-0.394 [-0.463, -0.325] w/l 1/81
+test lme-turn     turn/recall_all@10     unimem-prior-e5    - e5-small          n= 203 0.852 vs 0.813  d=+0.039 [+0.010, +0.074] w/l 10/2
+test lme-turn     turn/recall_all@10     unimem-prior-hash  - bm25              n= 203 0.749 vs 0.729  d=+0.020 [-0.015, +0.054] w/l 9/5
+test lme-turn     turn/recall_all@10     unimem-prior-e5    - unimem-prior-hash n= 203 0.852 vs 0.749  d=+0.103 [+0.064, +0.148] w/l 22/1
+test lme-turn     turn/recall_all@10     unimem-topk-e5     - unimem-prior-e5   n= 203 0.852 vs 0.852  d=+0.000 [+0.000, +0.000] w/l 0/0
+test lme-turn     turn/recall_all@5      unimem-prior-hash  - hybrid-rrf        n= 203 0.655 vs 0.690  d=-0.034 [-0.084, +0.015] w/l 10/17
+test lme-turn     turn/recall_all@5      unimem-prior-e5    - hybrid-rrf        n= 203 0.709 vs 0.690  d=+0.020 [-0.020, +0.059] w/l 10/6
+test lme-turn     turn/recall_all@5      unimem-topk-hash   - hybrid-rrf        n= 203 0.650 vs 0.690  d=-0.039 [-0.089, +0.010] w/l 9/17
+test lme-turn     turn/recall_all@5      unimem-topk-e5     - hybrid-rrf        n= 203 0.709 vs 0.690  d=+0.020 [-0.020, +0.059] w/l 10/6
+test lme-turn     turn/recall_all@5      unimem-e5          - hybrid-rrf        n= 203 0.547 vs 0.690  d=-0.143 [-0.202, -0.089] w/l 5/34
+test lme-turn     turn/recall_all@5      unimem-hash        - hybrid-rrf        n= 203 0.429 vs 0.690  d=-0.261 [-0.330, -0.197] w/l 4/57
+test lme-turn     turn/recall_all@5      unimem-prior-e5    - e5-small          n= 203 0.709 vs 0.650  d=+0.059 [+0.010, +0.113] w/l 22/10
+test lme-turn     turn/recall_all@5      unimem-prior-hash  - bm25              n= 203 0.655 vs 0.635  d=+0.020 [-0.015, +0.054] w/l 8/4
+test lme-turn     turn/recall_all@5      unimem-prior-e5    - unimem-prior-hash n= 203 0.709 vs 0.655  d=+0.054 [+0.010, +0.099] w/l 16/5
+test lme-turn     turn/recall_all@5      unimem-topk-e5     - unimem-prior-e5   n= 203 0.709 vs 0.709  d=+0.000 [-0.015, +0.015] w/l 1/1
+test locomo-turn  turn/recall_frac@10    unimem-prior-hash  - hybrid-rrf        n=1536 0.618 vs 0.629  d=-0.011 [-0.027, +0.005] w/l 122/152
+test locomo-turn  turn/recall_frac@10    unimem-prior-e5    - hybrid-rrf        n=1536 0.663 vs 0.629  d=+0.035 [+0.022, +0.047] w/l 122/53
+test locomo-turn  turn/recall_frac@10    unimem-topk-hash   - hybrid-rrf        n=1536 0.616 vs 0.629  d=-0.012 [-0.028, +0.003] w/l 122/154
+test locomo-turn  turn/recall_frac@10    unimem-topk-e5     - hybrid-rrf        n=1536 0.663 vs 0.629  d=+0.035 [+0.022, +0.047] w/l 121/53
+test locomo-turn  turn/recall_frac@10    unimem-e5          - hybrid-rrf        n=1536 0.516 vs 0.629  d=-0.112 [-0.127, -0.097] w/l 17/247
+test locomo-turn  turn/recall_frac@10    unimem-hash        - hybrid-rrf        n=1536 0.464 vs 0.629  d=-0.164 [-0.183, -0.145] w/l 44/369
+test locomo-turn  turn/recall_frac@10    unimem-prior-e5    - e5-small          n=1536 0.663 vs 0.569  d=+0.095 [+0.076, +0.113] w/l 259/80
+test locomo-turn  turn/recall_frac@10    unimem-prior-hash  - bm25              n=1536 0.618 vs 0.553  d=+0.065 [+0.050, +0.080] w/l 181/55
+test locomo-turn  turn/recall_frac@10    unimem-prior-e5    - unimem-prior-hash n=1536 0.663 vs 0.618  d=+0.046 [+0.032, +0.060] w/l 152/58
+test locomo-turn  turn/recall_frac@10    unimem-topk-e5     - unimem-prior-e5   n=1536 0.663 vs 0.663  d=-0.000 [-0.000, +0.000] w/l 0/1
+test locomo-turn  turn/recall_frac@5     unimem-prior-hash  - hybrid-rrf        n=1536 0.540 vs 0.551  d=-0.011 [-0.028, +0.005] w/l 119/150
+test locomo-turn  turn/recall_frac@5     unimem-prior-e5    - hybrid-rrf        n=1536 0.595 vs 0.551  d=+0.044 [+0.031, +0.057] w/l 134/43
+test locomo-turn  turn/recall_frac@5     unimem-topk-hash   - hybrid-rrf        n=1536 0.538 vs 0.551  d=-0.013 [-0.030, +0.004] w/l 119/153
+test locomo-turn  turn/recall_frac@5     unimem-topk-e5     - hybrid-rrf        n=1536 0.595 vs 0.551  d=+0.044 [+0.031, +0.057] w/l 134/43
+test locomo-turn  turn/recall_frac@5     unimem-e5          - hybrid-rrf        n=1536 0.510 vs 0.551  d=-0.041 [-0.054, -0.027] w/l 59/135
+test locomo-turn  turn/recall_frac@5     unimem-hash        - hybrid-rrf        n=1536 0.459 vs 0.551  d=-0.092 [-0.111, -0.074] w/l 80/267
+test locomo-turn  turn/recall_frac@5     unimem-prior-e5    - e5-small          n=1536 0.595 vs 0.482  d=+0.113 [+0.093, +0.131] w/l 278/69
+test locomo-turn  turn/recall_frac@5     unimem-prior-hash  - bm25              n=1536 0.540 vs 0.470  d=+0.070 [+0.054, +0.085] w/l 178/40
+test locomo-turn  turn/recall_frac@5     unimem-prior-e5    - unimem-prior-hash n=1536 0.595 vs 0.540  d=+0.055 [+0.041, +0.071] w/l 179/56
+test locomo-turn  turn/recall_frac@5     unimem-topk-e5     - unimem-prior-e5   n=1536 0.595 vs 0.595  d=+0.000 [-0.001, +0.002] w/l 1/1
+all  lme-session  session/recall_all@10  unimem-prior-hash  - hybrid-rrf        n= 419 0.921 vs 0.971  d=-0.050 [-0.074, -0.029] w/l 1/22
+all  lme-session  session/recall_all@10  unimem-prior-e5    - hybrid-rrf        n= 419 0.979 vs 0.971  d=+0.007 [-0.007, +0.021] w/l 6/3
+all  lme-session  session/recall_all@10  unimem-topk-hash   - hybrid-rrf        n= 419 0.921 vs 0.971  d=-0.050 [-0.074, -0.029] w/l 1/22
+all  lme-session  session/recall_all@10  unimem-topk-e5     - hybrid-rrf        n= 419 0.979 vs 0.971  d=+0.007 [-0.007, +0.021] w/l 6/3
+all  lme-session  session/recall_all@10  unimem-e5          - hybrid-rrf        n= 419 0.654 vs 0.971  d=-0.317 [-0.363, -0.272] w/l 0/133
+all  lme-session  session/recall_all@10  unimem-hash        - hybrid-rrf        n= 419 0.563 vs 0.971  d=-0.408 [-0.456, -0.360] w/l 0/171
+all  lme-session  session/recall_all@10  unimem-prior-e5    - e5-small          n= 419 0.979 vs 0.969  d=+0.010 [-0.002, +0.024] w/l 6/2
+all  lme-session  session/recall_all@10  unimem-prior-hash  - bm25              n= 419 0.921 vs 0.924  d=-0.002 [-0.021, +0.017] w/l 8/9
+all  lme-session  session/recall_all@10  unimem-prior-e5    - unimem-prior-hash n= 419 0.979 vs 0.921  d=+0.057 [+0.038, +0.081] w/l 24/0
+all  lme-session  session/recall_all@10  unimem-topk-e5     - unimem-prior-e5   n= 419 0.979 vs 0.979  d=+0.000 [+0.000, +0.000] w/l 0/0
+all  lme-session  session/recall_all@5   unimem-prior-hash  - hybrid-rrf        n= 419 0.854 vs 0.921  d=-0.067 [-0.093, -0.043] w/l 3/31
+all  lme-session  session/recall_all@5   unimem-prior-e5    - hybrid-rrf        n= 419 0.916 vs 0.921  d=-0.005 [-0.021, +0.012] w/l 6/8
+all  lme-session  session/recall_all@5   unimem-topk-hash   - hybrid-rrf        n= 419 0.852 vs 0.921  d=-0.069 [-0.095, -0.045] w/l 3/32
+all  lme-session  session/recall_all@5   unimem-topk-e5     - hybrid-rrf        n= 419 0.916 vs 0.921  d=-0.005 [-0.021, +0.012] w/l 6/8
+all  lme-session  session/recall_all@5   unimem-e5          - hybrid-rrf        n= 419 0.654 vs 0.921  d=-0.267 [-0.310, -0.224] w/l 1/113
+all  lme-session  session/recall_all@5   unimem-hash        - hybrid-rrf        n= 419 0.563 vs 0.921  d=-0.358 [-0.406, -0.313] w/l 1/151
+all  lme-session  session/recall_all@5   unimem-prior-e5    - e5-small          n= 419 0.916 vs 0.912  d=+0.005 [-0.019, +0.029] w/l 15/13
+all  lme-session  session/recall_all@5   unimem-prior-hash  - bm25              n= 419 0.854 vs 0.859  d=-0.005 [-0.026, +0.017] w/l 10/12
+all  lme-session  session/recall_all@5   unimem-prior-e5    - unimem-prior-hash n= 419 0.916 vs 0.854  d=+0.062 [+0.038, +0.086] w/l 28/2
+all  lme-session  session/recall_all@5   unimem-topk-e5     - unimem-prior-e5   n= 419 0.916 vs 0.916  d=+0.000 [+0.000, +0.000] w/l 0/0
+all  lme-turn     turn/recall_all@10     unimem-prior-hash  - hybrid-rrf        n= 419 0.759 vs 0.838  d=-0.079 [-0.107, -0.050] w/l 3/36
+all  lme-turn     turn/recall_all@10     unimem-prior-e5    - hybrid-rrf        n= 419 0.862 vs 0.838  d=+0.024 [+0.007, +0.043] w/l 13/3
+all  lme-turn     turn/recall_all@10     unimem-topk-hash   - hybrid-rrf        n= 419 0.757 vs 0.838  d=-0.081 [-0.110, -0.053] w/l 3/37
+all  lme-turn     turn/recall_all@10     unimem-topk-e5     - hybrid-rrf        n= 419 0.862 vs 0.838  d=+0.024 [+0.007, +0.043] w/l 13/3
+all  lme-turn     turn/recall_all@10     unimem-e5          - hybrid-rrf        n= 419 0.578 vs 0.838  d=-0.260 [-0.303, -0.217] w/l 0/109
+all  lme-turn     turn/recall_all@10     unimem-hash        - hybrid-rrf        n= 419 0.430 vs 0.838  d=-0.408 [-0.458, -0.363] w/l 1/172
+all  lme-turn     turn/recall_all@10     unimem-prior-e5    - e5-small          n= 419 0.862 vs 0.835  d=+0.026 [+0.005, +0.048] w/l 17/6
+all  lme-turn     turn/recall_all@10     unimem-prior-hash  - bm25              n= 419 0.759 vs 0.754  d=+0.005 [-0.021, +0.029] w/l 16/14
+all  lme-turn     turn/recall_all@10     unimem-prior-e5    - unimem-prior-hash n= 419 0.862 vs 0.759  d=+0.103 [+0.072, +0.134] w/l 44/1
+all  lme-turn     turn/recall_all@10     unimem-topk-e5     - unimem-prior-e5   n= 419 0.862 vs 0.862  d=+0.000 [+0.000, +0.000] w/l 0/0
+all  lme-turn     turn/recall_all@5      unimem-prior-hash  - hybrid-rrf        n= 419 0.675 vs 0.721  d=-0.045 [-0.079, -0.012] w/l 16/35
+all  lme-turn     turn/recall_all@5      unimem-prior-e5    - hybrid-rrf        n= 419 0.733 vs 0.721  d=+0.012 [-0.012, +0.038] w/l 17/12
+all  lme-turn     turn/recall_all@5      unimem-topk-hash   - hybrid-rrf        n= 419 0.673 vs 0.721  d=-0.048 [-0.081, -0.014] w/l 15/35
+all  lme-turn     turn/recall_all@5      unimem-topk-e5     - hybrid-rrf        n= 419 0.733 vs 0.721  d=+0.012 [-0.014, +0.038] w/l 17/12
+all  lme-turn     turn/recall_all@5      unimem-e5          - hybrid-rrf        n= 419 0.566 vs 0.721  d=-0.155 [-0.193, -0.117] w/l 7/72
+all  lme-turn     turn/recall_all@5      unimem-hash        - hybrid-rrf        n= 419 0.427 vs 0.721  d=-0.294 [-0.339, -0.248] w/l 6/129
+all  lme-turn     turn/recall_all@5      unimem-prior-e5    - e5-small          n= 419 0.733 vs 0.663  d=+0.069 [+0.036, +0.105] w/l 43/14
+all  lme-turn     turn/recall_all@5      unimem-prior-hash  - bm25              n= 419 0.675 vs 0.654  d=+0.021 [-0.007, +0.048] w/l 21/12
+all  lme-turn     turn/recall_all@5      unimem-prior-e5    - unimem-prior-hash n= 419 0.733 vs 0.675  d=+0.057 [+0.029, +0.091] w/l 34/10
+all  lme-turn     turn/recall_all@5      unimem-topk-e5     - unimem-prior-e5   n= 419 0.733 vs 0.733  d=+0.000 [-0.007, +0.007] w/l 1/1
+all  locomo-turn  turn/recall_frac@10    unimem-prior-hash  - hybrid-rrf        n=1536 0.618 vs 0.629  d=-0.011 [-0.027, +0.005] w/l 122/152
+all  locomo-turn  turn/recall_frac@10    unimem-prior-e5    - hybrid-rrf        n=1536 0.663 vs 0.629  d=+0.035 [+0.022, +0.047] w/l 122/53
+all  locomo-turn  turn/recall_frac@10    unimem-topk-hash   - hybrid-rrf        n=1536 0.616 vs 0.629  d=-0.012 [-0.028, +0.003] w/l 122/154
+all  locomo-turn  turn/recall_frac@10    unimem-topk-e5     - hybrid-rrf        n=1536 0.663 vs 0.629  d=+0.035 [+0.022, +0.047] w/l 121/53
+all  locomo-turn  turn/recall_frac@10    unimem-e5          - hybrid-rrf        n=1536 0.516 vs 0.629  d=-0.112 [-0.127, -0.097] w/l 17/247
+all  locomo-turn  turn/recall_frac@10    unimem-hash        - hybrid-rrf        n=1536 0.464 vs 0.629  d=-0.164 [-0.183, -0.145] w/l 44/369
+all  locomo-turn  turn/recall_frac@10    unimem-prior-e5    - e5-small          n=1536 0.663 vs 0.569  d=+0.095 [+0.076, +0.113] w/l 259/80
+all  locomo-turn  turn/recall_frac@10    unimem-prior-hash  - bm25              n=1536 0.618 vs 0.553  d=+0.065 [+0.050, +0.080] w/l 181/55
+all  locomo-turn  turn/recall_frac@10    unimem-prior-e5    - unimem-prior-hash n=1536 0.663 vs 0.618  d=+0.046 [+0.032, +0.060] w/l 152/58
+all  locomo-turn  turn/recall_frac@10    unimem-topk-e5     - unimem-prior-e5   n=1536 0.663 vs 0.663  d=-0.000 [-0.000, +0.000] w/l 0/1
+all  locomo-turn  turn/recall_frac@5     unimem-prior-hash  - hybrid-rrf        n=1536 0.540 vs 0.551  d=-0.011 [-0.028, +0.005] w/l 119/150
+all  locomo-turn  turn/recall_frac@5     unimem-prior-e5    - hybrid-rrf        n=1536 0.595 vs 0.551  d=+0.044 [+0.031, +0.057] w/l 134/43
+all  locomo-turn  turn/recall_frac@5     unimem-topk-hash   - hybrid-rrf        n=1536 0.538 vs 0.551  d=-0.013 [-0.030, +0.004] w/l 119/153
+all  locomo-turn  turn/recall_frac@5     unimem-topk-e5     - hybrid-rrf        n=1536 0.595 vs 0.551  d=+0.044 [+0.031, +0.057] w/l 134/43
+all  locomo-turn  turn/recall_frac@5     unimem-e5          - hybrid-rrf        n=1536 0.510 vs 0.551  d=-0.041 [-0.054, -0.027] w/l 59/135
+all  locomo-turn  turn/recall_frac@5     unimem-hash        - hybrid-rrf        n=1536 0.459 vs 0.551  d=-0.092 [-0.111, -0.074] w/l 80/267
+all  locomo-turn  turn/recall_frac@5     unimem-prior-e5    - e5-small          n=1536 0.595 vs 0.482  d=+0.113 [+0.093, +0.131] w/l 278/69
+all  locomo-turn  turn/recall_frac@5     unimem-prior-hash  - bm25              n=1536 0.540 vs 0.470  d=+0.070 [+0.054, +0.085] w/l 178/40
+all  locomo-turn  turn/recall_frac@5     unimem-prior-e5    - unimem-prior-hash n=1536 0.595 vs 0.540  d=+0.055 [+0.041, +0.071] w/l 179/56
+all  locomo-turn  turn/recall_frac@5     unimem-topk-e5     - unimem-prior-e5   n=1536 0.595 vs 0.595  d=+0.000 [-0.001, +0.002] w/l 1/1

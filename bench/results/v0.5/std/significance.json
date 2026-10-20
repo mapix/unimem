@@ -1,0 +1,2042 @@
+[
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.896551724137931,
+  "mean_b": 0.9655172413793104,
+  "delta": -0.06896551724137931,
+  "ci95": [
+   -0.10344827586206896,
+   -0.034482758620689655
+  ],
+  "win": 0,
+  "loss": 14
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.9753694581280788,
+  "mean_b": 0.9655172413793104,
+  "delta": 0.009852216748768473,
+  "ci95": [
+   -0.009852216748768473,
+   0.029556650246305417
+  ],
+  "win": 3,
+  "loss": 1
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.896551724137931,
+  "mean_b": 0.9655172413793104,
+  "delta": -0.06896551724137931,
+  "ci95": [
+   -0.10344827586206896,
+   -0.034482758620689655
+  ],
+  "win": 0,
+  "loss": 14
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.9753694581280788,
+  "mean_b": 0.9655172413793104,
+  "delta": 0.009852216748768473,
+  "ci95": [
+   -0.009852216748768473,
+   0.029556650246305417
+  ],
+  "win": 3,
+  "loss": 1
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.6502463054187192,
+  "mean_b": 0.9655172413793104,
+  "delta": -0.31527093596059114,
+  "ci95": [
+   -0.3793103448275862,
+   -0.2512315270935961
+  ],
+  "win": 0,
+  "loss": 64
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.5270935960591133,
+  "mean_b": 0.9655172413793104,
+  "delta": -0.43842364532019706,
+  "ci95": [
+   -0.5024630541871922,
+   -0.3694581280788177
+  ],
+  "win": 0,
+  "loss": 89
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.9753694581280788,
+  "mean_b": 0.9655172413793104,
+  "delta": 0.009852216748768473,
+  "ci95": [
+   -0.009852216748768473,
+   0.029556650246305417
+  ],
+  "win": 3,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.896551724137931,
+  "mean_b": 0.9113300492610837,
+  "delta": -0.014778325123152709,
+  "ci95": [
+   -0.03940886699507389,
+   0.009852216748768473
+  ],
+  "win": 2,
+  "loss": 5
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.9753694581280788,
+  "mean_b": 0.896551724137931,
+  "delta": 0.07881773399014778,
+  "ci95": [
+   0.04433497536945813,
+   0.11822660098522167
+  ],
+  "win": 16,
+  "loss": 0
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@10",
+  "n": 203,
+  "mean_a": 0.9753694581280788,
+  "mean_b": 0.9753694581280788,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.8472906403940886,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.059113300492610835,
+  "ci95": [
+   -0.09852216748768473,
+   -0.024630541871921183
+  ],
+  "win": 2,
+  "loss": 14
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.9014778325123153,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.0049261083743842365,
+  "ci95": [
+   -0.03940886699507389,
+   0.024630541871921183
+  ],
+  "win": 5,
+  "loss": 6
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.8472906403940886,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.059113300492610835,
+  "ci95": [
+   -0.09852216748768473,
+   -0.024630541871921183
+  ],
+  "win": 2,
+  "loss": 14
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.9014778325123153,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.0049261083743842365,
+  "ci95": [
+   -0.03940886699507389,
+   0.024630541871921183
+  ],
+  "win": 5,
+  "loss": 6
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.6502463054187192,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.2561576354679803,
+  "ci95": [
+   -0.32019704433497537,
+   -0.1921182266009852
+  ],
+  "win": 1,
+  "loss": 53
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.5270935960591133,
+  "mean_b": 0.9064039408866995,
+  "delta": -0.3793103448275862,
+  "ci95": [
+   -0.4482758620689655,
+   -0.3103448275862069
+  ],
+  "win": 1,
+  "loss": 78
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.9014778325123153,
+  "mean_b": 0.9211822660098522,
+  "delta": -0.019704433497536946,
+  "ci95": [
+   -0.054187192118226604,
+   0.014778325123152709
+  ],
+  "win": 5,
+  "loss": 9
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.8472906403940886,
+  "mean_b": 0.8472906403940886,
+  "delta": 0.0,
+  "ci95": [
+   -0.034482758620689655,
+   0.034482758620689655
+  ],
+  "win": 7,
+  "loss": 7
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.9014778325123153,
+  "mean_b": 0.8472906403940886,
+  "delta": 0.054187192118226604,
+  "ci95": [
+   0.019704433497536946,
+   0.08866995073891626
+  ],
+  "win": 13,
+  "loss": 2
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-session",
+  "split": "test",
+  "metric": "session/recall_all@5",
+  "n": 203,
+  "mean_a": 0.9014778325123153,
+  "mean_b": 0.9014778325123153,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.7487684729064039,
+  "mean_b": 0.8275862068965517,
+  "delta": -0.07881773399014778,
+  "ci95": [
+   -0.12315270935960591,
+   -0.034482758620689655
+  ],
+  "win": 3,
+  "loss": 19
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.8522167487684729,
+  "mean_b": 0.8275862068965517,
+  "delta": 0.024630541871921183,
+  "ci95": [
+   0.0,
+   0.054187192118226604
+  ],
+  "win": 6,
+  "loss": 1
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.7438423645320197,
+  "mean_b": 0.8275862068965517,
+  "delta": -0.08374384236453201,
+  "ci95": [
+   -0.12807881773399016,
+   -0.03940886699507389
+  ],
+  "win": 3,
+  "loss": 20
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.8522167487684729,
+  "mean_b": 0.8275862068965517,
+  "delta": 0.024630541871921183,
+  "ci95": [
+   0.0,
+   0.054187192118226604
+  ],
+  "win": 6,
+  "loss": 1
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.5665024630541872,
+  "mean_b": 0.8275862068965517,
+  "delta": -0.26108374384236455,
+  "ci95": [
+   -0.32019704433497537,
+   -0.2019704433497537
+  ],
+  "win": 0,
+  "loss": 53
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.43349753694581283,
+  "mean_b": 0.8275862068965517,
+  "delta": -0.39408866995073893,
+  "ci95": [
+   -0.4630541871921182,
+   -0.3251231527093596
+  ],
+  "win": 1,
+  "loss": 81
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.8522167487684729,
+  "mean_b": 0.812807881773399,
+  "delta": 0.03940886699507389,
+  "ci95": [
+   0.009852216748768473,
+   0.07389162561576355
+  ],
+  "win": 10,
+  "loss": 2
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.7487684729064039,
+  "mean_b": 0.729064039408867,
+  "delta": 0.019704433497536946,
+  "ci95": [
+   -0.014778325123152709,
+   0.054187192118226604
+  ],
+  "win": 9,
+  "loss": 5
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.8522167487684729,
+  "mean_b": 0.7487684729064039,
+  "delta": 0.10344827586206896,
+  "ci95": [
+   0.06403940886699508,
+   0.1477832512315271
+  ],
+  "win": 22,
+  "loss": 1
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@10",
+  "n": 203,
+  "mean_a": 0.8522167487684729,
+  "mean_b": 0.8522167487684729,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.6551724137931034,
+  "mean_b": 0.6896551724137931,
+  "delta": -0.034482758620689655,
+  "ci95": [
+   -0.08374384236453201,
+   0.014778325123152709
+  ],
+  "win": 10,
+  "loss": 17
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.7093596059113301,
+  "mean_b": 0.6896551724137931,
+  "delta": 0.019704433497536946,
+  "ci95": [
+   -0.019704433497536946,
+   0.059113300492610835
+  ],
+  "win": 10,
+  "loss": 6
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.6502463054187192,
+  "mean_b": 0.6896551724137931,
+  "delta": -0.03940886699507389,
+  "ci95": [
+   -0.08866995073891626,
+   0.009852216748768473
+  ],
+  "win": 9,
+  "loss": 17
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.7093596059113301,
+  "mean_b": 0.6896551724137931,
+  "delta": 0.019704433497536946,
+  "ci95": [
+   -0.019704433497536946,
+   0.059113300492610835
+  ],
+  "win": 10,
+  "loss": 6
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.5467980295566502,
+  "mean_b": 0.6896551724137931,
+  "delta": -0.14285714285714285,
+  "ci95": [
+   -0.2019704433497537,
+   -0.08866995073891626
+  ],
+  "win": 5,
+  "loss": 34
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.42857142857142855,
+  "mean_b": 0.6896551724137931,
+  "delta": -0.26108374384236455,
+  "ci95": [
+   -0.33004926108374383,
+   -0.19704433497536947
+  ],
+  "win": 4,
+  "loss": 57
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.7093596059113301,
+  "mean_b": 0.6502463054187192,
+  "delta": 0.059113300492610835,
+  "ci95": [
+   0.009852216748768473,
+   0.11330049261083744
+  ],
+  "win": 22,
+  "loss": 10
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.6551724137931034,
+  "mean_b": 0.6354679802955665,
+  "delta": 0.019704433497536946,
+  "ci95": [
+   -0.014778325123152709,
+   0.054187192118226604
+  ],
+  "win": 8,
+  "loss": 4
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.7093596059113301,
+  "mean_b": 0.6551724137931034,
+  "delta": 0.054187192118226604,
+  "ci95": [
+   0.009852216748768473,
+   0.09852216748768473
+  ],
+  "win": 16,
+  "loss": 5
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-turn",
+  "split": "test",
+  "metric": "turn/recall_all@5",
+  "n": 203,
+  "mean_a": 0.7093596059113301,
+  "mean_b": 0.7093596059113301,
+  "delta": 0.0,
+  "ci95": [
+   -0.014778325123152709,
+   0.014778325123152709
+  ],
+  "win": 1,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6177308030095011,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.0109784325662083,
+  "ci95": [
+   -0.026597983732634473,
+   0.004824593979005743
+  ],
+  "win": 122,
+  "loss": 152
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.6287092355757095,
+  "delta": 0.03470517113095239,
+  "ci95": [
+   0.02212921626984127,
+   0.04708116319444445
+  ],
+  "win": 122,
+  "loss": 53
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6164287196761679,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.012280515899541634,
+  "ci95": [
+   -0.02804538126803752,
+   0.0034865019240019265
+  ],
+  "win": 122,
+  "loss": 154
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6632516462899952,
+  "mean_b": 0.6287092355757095,
+  "delta": 0.034542410714285716,
+  "ci95": [
+   0.021864149305555552,
+   0.046934937169312185
+  ],
+  "win": 121,
+  "loss": 53
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.5164899444501686,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.11221929112554117,
+  "ci95": [
+   -0.1271561879960318,
+   -0.09655088834776336
+  ],
+  "win": 17,
+  "loss": 247
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.46440422517982155,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.16430501039588816,
+  "ci95": [
+   -0.18348605540701132,
+   -0.14464683462558003
+  ],
+  "win": 44,
+  "loss": 369
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.5685929731616532,
+  "delta": 0.09482143354500892,
+  "ci95": [
+   0.075757360235761,
+   0.11297104779411765
+  ],
+  "win": 259,
+  "loss": 80
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6177308030095011,
+  "mean_b": 0.5529438899804009,
+  "delta": 0.06478691302910053,
+  "ci95": [
+   0.050049086474867714,
+   0.07991794808201054
+  ],
+  "win": 181,
+  "loss": 55
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.6177308030095011,
+  "delta": 0.045683603697160687,
+  "ci95": [
+   0.03165556231962481,
+   0.06045076884920637
+  ],
+  "win": 152,
+  "loss": 58
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6632516462899952,
+  "mean_b": 0.663414406706662,
+  "delta": -0.00016276041666666666,
+  "ci95": [
+   -0.00048828125,
+   0.0
+  ],
+  "win": 0,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5395666609322157,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.011294995428727047,
+  "ci95": [
+   -0.02803865035597573,
+   0.005464221278789292
+  ],
+  "win": 119,
+  "loss": 150
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.5508616563609429,
+  "delta": 0.04406203966750841,
+  "ci95": [
+   0.030905784030784034,
+   0.05698986704846081
+  ],
+  "win": 134,
+  "loss": 43
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5379390567655491,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.012922599595393713,
+  "ci95": [
+   -0.030145174389200127,
+   0.003523436284235916
+  ],
+  "win": 119,
+  "loss": 153
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5952492168617846,
+  "mean_b": 0.5508616563609429,
+  "delta": 0.04438756050084174,
+  "ci95": [
+   0.031129561988937,
+   0.05698986704846081
+  ],
+  "win": 134,
+  "loss": 43
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5102290937557242,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.04063256260521885,
+  "ci95": [
+   -0.05424863403379029,
+   -0.0272686406475469
+  ],
+  "win": 59,
+  "loss": 135
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.458751013374266,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.09211064298667698,
+  "ci95": [
+   -0.11071021290460636,
+   -0.07377467006373255
+  ],
+  "win": 80,
+  "loss": 267
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.4822496399127836,
+  "delta": 0.11267405611566798,
+  "ci95": [
+   0.09306358788780665,
+   0.13149409241617296
+  ],
+  "win": 278,
+  "loss": 69
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5395666609322157,
+  "mean_b": 0.46979637651636635,
+  "delta": 0.06977028441584968,
+  "ci95": [
+   0.05412384137682852,
+   0.08507841070455961
+  ],
+  "win": 178,
+  "loss": 40
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.5395666609322157,
+  "delta": 0.05535703509623543,
+  "ci95": [
+   0.041000472158560404,
+   0.07100785626750698
+  ],
+  "win": 179,
+  "loss": 56
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "locomo-turn",
+  "split": "test",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5952492168617846,
+  "mean_b": 0.5949236960284513,
+  "delta": 0.0003255208333333333,
+  "ci95": [
+   -0.0009765625,
+   0.001953125
+  ],
+  "win": 1,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9212410501193318,
+  "mean_b": 0.9713603818615751,
+  "delta": -0.050119331742243436,
+  "ci95": [
+   -0.07398568019093078,
+   -0.028639618138424822
+  ],
+  "win": 1,
+  "loss": 22
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9785202863961814,
+  "mean_b": 0.9713603818615751,
+  "delta": 0.007159904534606206,
+  "ci95": [
+   -0.007159904534606206,
+   0.021479713603818614
+  ],
+  "win": 6,
+  "loss": 3
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9212410501193318,
+  "mean_b": 0.9713603818615751,
+  "delta": -0.050119331742243436,
+  "ci95": [
+   -0.07398568019093078,
+   -0.028639618138424822
+  ],
+  "win": 1,
+  "loss": 22
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9785202863961814,
+  "mean_b": 0.9713603818615751,
+  "delta": 0.007159904534606206,
+  "ci95": [
+   -0.007159904534606206,
+   0.021479713603818614
+  ],
+  "win": 6,
+  "loss": 3
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.6539379474940334,
+  "mean_b": 0.9713603818615751,
+  "delta": -0.31742243436754175,
+  "ci95": [
+   -0.3627684964200477,
+   -0.2720763723150358
+  ],
+  "win": 0,
+  "loss": 133
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.5632458233890215,
+  "mean_b": 0.9713603818615751,
+  "delta": -0.4081145584725537,
+  "ci95": [
+   -0.45584725536992843,
+   -0.360381861575179
+  ],
+  "win": 0,
+  "loss": 171
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9785202863961814,
+  "mean_b": 0.9689737470167065,
+  "delta": 0.00954653937947494,
+  "ci95": [
+   -0.002386634844868735,
+   0.02386634844868735
+  ],
+  "win": 6,
+  "loss": 2
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9212410501193318,
+  "mean_b": 0.9236276849642004,
+  "delta": -0.002386634844868735,
+  "ci95": [
+   -0.021479713603818614,
+   0.016706443914081145
+  ],
+  "win": 8,
+  "loss": 9
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9785202863961814,
+  "mean_b": 0.9212410501193318,
+  "delta": 0.057279236276849645,
+  "ci95": [
+   0.03818615751789976,
+   0.081145584725537
+  ],
+  "win": 24,
+  "loss": 0
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@10",
+  "n": 419,
+  "mean_a": 0.9785202863961814,
+  "mean_b": 0.9785202863961814,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.8544152744630071,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.06682577565632458,
+  "ci95": [
+   -0.09307875894988067,
+   -0.04295942720763723
+  ],
+  "win": 3,
+  "loss": 31
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.9164677804295943,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.00477326968973747,
+  "ci95": [
+   -0.021479713603818614,
+   0.011933174224343675
+  ],
+  "win": 6,
+  "loss": 8
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.8520286396181385,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.06921241050119331,
+  "ci95": [
+   -0.0954653937947494,
+   -0.045346062052505964
+  ],
+  "win": 3,
+  "loss": 32
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.9164677804295943,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.00477326968973747,
+  "ci95": [
+   -0.021479713603818614,
+   0.011933174224343675
+  ],
+  "win": 6,
+  "loss": 8
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.6539379474940334,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.26730310262529833,
+  "ci95": [
+   -0.31026252983293556,
+   -0.2243436754176611
+  ],
+  "win": 1,
+  "loss": 113
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.5632458233890215,
+  "mean_b": 0.9212410501193318,
+  "delta": -0.35799522673031026,
+  "ci95": [
+   -0.40572792362768495,
+   -0.3126491646778043
+  ],
+  "win": 1,
+  "loss": 151
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.9164677804295943,
+  "mean_b": 0.9116945107398569,
+  "delta": 0.00477326968973747,
+  "ci95": [
+   -0.01909307875894988,
+   0.028639618138424822
+  ],
+  "win": 15,
+  "loss": 13
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.8544152744630071,
+  "mean_b": 0.8591885441527446,
+  "delta": -0.00477326968973747,
+  "ci95": [
+   -0.026252983293556086,
+   0.016706443914081145
+  ],
+  "win": 10,
+  "loss": 12
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.9164677804295943,
+  "mean_b": 0.8544152744630071,
+  "delta": 0.06205250596658711,
+  "ci95": [
+   0.03818615751789976,
+   0.08591885441527446
+  ],
+  "win": 28,
+  "loss": 2
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-session",
+  "split": "all",
+  "metric": "session/recall_all@5",
+  "n": 419,
+  "mean_a": 0.9164677804295943,
+  "mean_b": 0.9164677804295943,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.7589498806682577,
+  "mean_b": 0.837708830548926,
+  "delta": -0.07875894988066826,
+  "ci95": [
+   -0.10739856801909307,
+   -0.050119331742243436
+  ],
+  "win": 3,
+  "loss": 36
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.8615751789976134,
+  "mean_b": 0.837708830548926,
+  "delta": 0.02386634844868735,
+  "ci95": [
+   0.007159904534606206,
+   0.04295942720763723
+  ],
+  "win": 13,
+  "loss": 3
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.7565632458233891,
+  "mean_b": 0.837708830548926,
+  "delta": -0.081145584725537,
+  "ci95": [
+   -0.10978520286396182,
+   -0.05250596658711217
+  ],
+  "win": 3,
+  "loss": 37
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.8615751789976134,
+  "mean_b": 0.837708830548926,
+  "delta": 0.02386634844868735,
+  "ci95": [
+   0.007159904534606206,
+   0.04295942720763723
+  ],
+  "win": 13,
+  "loss": 3
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.5775656324582339,
+  "mean_b": 0.837708830548926,
+  "delta": -0.26014319809069214,
+  "ci95": [
+   -0.3031026252983294,
+   -0.2171837708830549
+  ],
+  "win": 0,
+  "loss": 109
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.4295942720763723,
+  "mean_b": 0.837708830548926,
+  "delta": -0.4081145584725537,
+  "ci95": [
+   -0.45823389021479716,
+   -0.3627684964200477
+  ],
+  "win": 1,
+  "loss": 172
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.8615751789976134,
+  "mean_b": 0.8353221957040573,
+  "delta": 0.026252983293556086,
+  "ci95": [
+   0.00477326968973747,
+   0.0477326968973747
+  ],
+  "win": 17,
+  "loss": 6
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.7589498806682577,
+  "mean_b": 0.7541766109785203,
+  "delta": 0.00477326968973747,
+  "ci95": [
+   -0.021479713603818614,
+   0.028639618138424822
+  ],
+  "win": 16,
+  "loss": 14
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.8615751789976134,
+  "mean_b": 0.7589498806682577,
+  "delta": 0.1026252983293556,
+  "ci95": [
+   0.07159904534606205,
+   0.13365155131264916
+  ],
+  "win": 44,
+  "loss": 1
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@10",
+  "n": 419,
+  "mean_a": 0.8615751789976134,
+  "mean_b": 0.8615751789976134,
+  "delta": 0.0,
+  "ci95": [
+   0.0,
+   0.0
+  ],
+  "win": 0,
+  "loss": 0
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.6754176610978521,
+  "mean_b": 0.720763723150358,
+  "delta": -0.045346062052505964,
+  "ci95": [
+   -0.07875894988066826,
+   -0.011933174224343675
+  ],
+  "win": 16,
+  "loss": 35
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.7326968973747017,
+  "mean_b": 0.720763723150358,
+  "delta": 0.011933174224343675,
+  "ci95": [
+   -0.011933174224343675,
+   0.03818615751789976
+  ],
+  "win": 17,
+  "loss": 12
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.6730310262529833,
+  "mean_b": 0.720763723150358,
+  "delta": -0.0477326968973747,
+  "ci95": [
+   -0.081145584725537,
+   -0.014319809069212411
+  ],
+  "win": 15,
+  "loss": 35
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.7326968973747017,
+  "mean_b": 0.720763723150358,
+  "delta": 0.011933174224343675,
+  "ci95": [
+   -0.014319809069212411,
+   0.03818615751789976
+  ],
+  "win": 17,
+  "loss": 12
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.5656324582338902,
+  "mean_b": 0.720763723150358,
+  "delta": -0.15513126491646778,
+  "ci95": [
+   -0.19331742243436753,
+   -0.11694510739856802
+  ],
+  "win": 7,
+  "loss": 72
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.42720763723150357,
+  "mean_b": 0.720763723150358,
+  "delta": -0.2935560859188544,
+  "ci95": [
+   -0.33890214797136037,
+   -0.24821002386634844
+  ],
+  "win": 6,
+  "loss": 129
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.7326968973747017,
+  "mean_b": 0.6634844868735084,
+  "delta": 0.06921241050119331,
+  "ci95": [
+   0.03579952267303103,
+   0.10501193317422435
+  ],
+  "win": 43,
+  "loss": 14
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.6754176610978521,
+  "mean_b": 0.6539379474940334,
+  "delta": 0.021479713603818614,
+  "ci95": [
+   -0.007159904534606206,
+   0.0477326968973747
+  ],
+  "win": 21,
+  "loss": 12
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.7326968973747017,
+  "mean_b": 0.6754176610978521,
+  "delta": 0.057279236276849645,
+  "ci95": [
+   0.028639618138424822,
+   0.09069212410501193
+  ],
+  "win": 34,
+  "loss": 10
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "lme-turn",
+  "split": "all",
+  "metric": "turn/recall_all@5",
+  "n": 419,
+  "mean_a": 0.7326968973747017,
+  "mean_b": 0.7326968973747017,
+  "delta": 0.0,
+  "ci95": [
+   -0.007159904534606206,
+   0.007159904534606206
+  ],
+  "win": 1,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6177308030095011,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.0109784325662083,
+  "ci95": [
+   -0.026597983732634473,
+   0.004824593979005743
+  ],
+  "win": 122,
+  "loss": 152
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.6287092355757095,
+  "delta": 0.03470517113095239,
+  "ci95": [
+   0.02212921626984127,
+   0.04708116319444445
+  ],
+  "win": 122,
+  "loss": 53
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6164287196761679,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.012280515899541634,
+  "ci95": [
+   -0.02804538126803752,
+   0.0034865019240019265
+  ],
+  "win": 122,
+  "loss": 154
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6632516462899952,
+  "mean_b": 0.6287092355757095,
+  "delta": 0.034542410714285716,
+  "ci95": [
+   0.021864149305555552,
+   0.046934937169312185
+  ],
+  "win": 121,
+  "loss": 53
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.5164899444501686,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.11221929112554117,
+  "ci95": [
+   -0.1271561879960318,
+   -0.09655088834776336
+  ],
+  "win": 17,
+  "loss": 247
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.46440422517982155,
+  "mean_b": 0.6287092355757095,
+  "delta": -0.16430501039588816,
+  "ci95": [
+   -0.18348605540701132,
+   -0.14464683462558003
+  ],
+  "win": 44,
+  "loss": 369
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.5685929731616532,
+  "delta": 0.09482143354500892,
+  "ci95": [
+   0.075757360235761,
+   0.11297104779411765
+  ],
+  "win": 259,
+  "loss": 80
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6177308030095011,
+  "mean_b": 0.5529438899804009,
+  "delta": 0.06478691302910053,
+  "ci95": [
+   0.050049086474867714,
+   0.07991794808201054
+  ],
+  "win": 181,
+  "loss": 55
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.663414406706662,
+  "mean_b": 0.6177308030095011,
+  "delta": 0.045683603697160687,
+  "ci95": [
+   0.03165556231962481,
+   0.06045076884920637
+  ],
+  "win": 152,
+  "loss": 58
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@10",
+  "n": 1536,
+  "mean_a": 0.6632516462899952,
+  "mean_b": 0.663414406706662,
+  "delta": -0.00016276041666666666,
+  "ci95": [
+   -0.00048828125,
+   0.0
+  ],
+  "win": 0,
+  "loss": 1
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5395666609322157,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.011294995428727047,
+  "ci95": [
+   -0.02803865035597573,
+   0.005464221278789292
+  ],
+  "win": 119,
+  "loss": 150
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.5508616563609429,
+  "delta": 0.04406203966750841,
+  "ci95": [
+   0.030905784030784034,
+   0.05698986704846081
+  ],
+  "win": 134,
+  "loss": 43
+ },
+ {
+  "a": "unimem-topk-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5379390567655491,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.012922599595393713,
+  "ci95": [
+   -0.030145174389200127,
+   0.003523436284235916
+  ],
+  "win": 119,
+  "loss": 153
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5952492168617846,
+  "mean_b": 0.5508616563609429,
+  "delta": 0.04438756050084174,
+  "ci95": [
+   0.031129561988937,
+   0.05698986704846081
+  ],
+  "win": 134,
+  "loss": 43
+ },
+ {
+  "a": "unimem-e5",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5102290937557242,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.04063256260521885,
+  "ci95": [
+   -0.05424863403379029,
+   -0.0272686406475469
+  ],
+  "win": 59,
+  "loss": 135
+ },
+ {
+  "a": "unimem-hash",
+  "b": "hybrid-rrf",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.458751013374266,
+  "mean_b": 0.5508616563609429,
+  "delta": -0.09211064298667698,
+  "ci95": [
+   -0.11071021290460636,
+   -0.07377467006373255
+  ],
+  "win": 80,
+  "loss": 267
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "e5-small",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.4822496399127836,
+  "delta": 0.11267405611566798,
+  "ci95": [
+   0.09306358788780665,
+   0.13149409241617296
+  ],
+  "win": 278,
+  "loss": 69
+ },
+ {
+  "a": "unimem-prior-hash",
+  "b": "bm25",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5395666609322157,
+  "mean_b": 0.46979637651636635,
+  "delta": 0.06977028441584968,
+  "ci95": [
+   0.05412384137682852,
+   0.08507841070455961
+  ],
+  "win": 178,
+  "loss": 40
+ },
+ {
+  "a": "unimem-prior-e5",
+  "b": "unimem-prior-hash",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5949236960284513,
+  "mean_b": 0.5395666609322157,
+  "delta": 0.05535703509623543,
+  "ci95": [
+   0.041000472158560404,
+   0.07100785626750698
+  ],
+  "win": 179,
+  "loss": 56
+ },
+ {
+  "a": "unimem-topk-e5",
+  "b": "unimem-prior-e5",
+  "group": "locomo-turn",
+  "split": "all",
+  "metric": "turn/recall_frac@5",
+  "n": 1536,
+  "mean_a": 0.5952492168617846,
+  "mean_b": 0.5949236960284513,
+  "delta": 0.0003255208333333333,
+  "ci95": [
+   -0.0009765625,
+   0.001953125
+  ],
+  "win": 1,
+  "loss": 1
+ }
+]

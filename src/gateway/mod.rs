@@ -301,7 +301,7 @@ pub async fn build_augmentation(st: &AppState, ctx: &Ctx, prompt: &str) -> Optio
     }
     if cfg.recall {
         let budget = std::time::Duration::from_millis(cfg.recall_budget_ms);
-        let fut = st.engine.recall(ctx, RecallReq { query: truncate_chars(prompt, 2000), project: None, k: cfg.max_recall_notes, passive: true });
+        let fut = st.engine.recall(ctx, RecallReq { query: truncate_chars(prompt, 2000), project: None, k: cfg.max_recall_notes, passive: true, ..Default::default() });
         match tokio::time::timeout(budget, fut).await {
             Ok(Ok(out)) if !out.notes.is_empty() => {
                 parts.push(format!(
@@ -403,7 +403,21 @@ async fn api_recall(State(st): State<Shared>, headers: HeaderMap, Json(v): Json<
     let ctx = make_ctx(&st, &info);
     match st
         .engine
-        .recall(&ctx, RecallReq { query: v["query"].as_str().unwrap_or("").into(), project: v["project"].as_str().map(String::from), k: v["k"].as_u64().unwrap_or(5) as usize, passive: v["passive"].as_bool().unwrap_or(false) })
+        .recall(
+            &ctx,
+            RecallReq {
+                query: v["query"].as_str().unwrap_or("").into(),
+                project: v["project"].as_str().map(String::from),
+                k: v["k"].as_u64().unwrap_or(5) as usize,
+                passive: v["passive"].as_bool().unwrap_or(false),
+                // `"depth": "top_k"` returns the ranked top-k instead of the adaptive cut-off
+                depth: if v["depth"].as_str() == Some("top_k") {
+                    crate::engine::Depth::TopK
+                } else {
+                    crate::engine::Depth::Adaptive
+                },
+            },
+        )
         .await
     {
         Ok(o) => Json(serde_json::to_value(o).unwrap_or_default()).into_response(),

@@ -56,8 +56,9 @@ enum Cmd {
         /// Also search another project (name / pid) or "all".
         #[arg(long)]
         project: Option<String>,
-        #[arg(short, long, default_value_t = 5)]
-        k: usize,
+        /// Return the k best notes (ranked, with scores). Default: the adaptive cut-off (the few clearly relevant notes, at most 5).
+        #[arg(short, long)]
+        k: Option<usize>,
         #[arg(long)]
         cwd: Option<String>,
         #[arg(long)]
@@ -108,6 +109,11 @@ enum Cmd {
     },
     /// Recompute all embeddings with the configured embedder.
     Reembed,
+    /// Local embedding models for `[embedder] kind = "onnx"`.
+    Models {
+        #[command(subcommand)]
+        cmd: ModelsCmd,
+    },
     /// Distill idle sessions' episodes into memories now.
     Distill {
         /// Ignore the idle threshold (distill every session with pending episodes).
@@ -130,6 +136,54 @@ enum Cmd {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum ModelsCmd {
+    /// Download a model into <data_dir>/models/ (sha256-checked): e5-small = intfloat/multilingual-e5-small.
+    Download {
+        name: String,
+        /// Target directory (default: <data_dir>/models/<model>).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// List downloadable models and what is installed.
+    List,
+}
+
+async fn models_download(cfg: &Config, name: &str, dir: Option<PathBuf>) -> Result<()> {
+    use sha2::Digest;
+    let spec = unimem::embed::model_spec(name).ok_or_else(|| anyhow::anyhow!("unknown model '{name}' (known: e5-small)"))?;
+    let dir = dir.unwrap_or_else(|| cfg.data_dir().join("models").join(spec.dir));
+    std::fs::create_dir_all(&dir)?;
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(1800)).build()?;
+    for (file, sha) in spec.files {
+        let path = dir.join(file);
+        let ok = |p: &std::path::Path| -> bool { sha.is_empty() || std::fs::read(p).map(|b| format!("{:x}", sha2::Sha256::digest(&b)) == *sha).unwrap_or(false) };
+        if path.exists() && ok(&path) {
+            println!("ok        {}", path.display());
+            continue;
+        }
+        let url = format!("{}/{file}", spec.base_url);
+        println!("download  {url}");
+        let r = client.get(&url).send().await?.error_for_status()?;
+        let bytes = r.bytes().await?;
+        let tmp = path.with_extension("part");
+        std::fs::write(&tmp, &bytes)?;
+        if !ok(&tmp) {
+            let _ = std::fs::remove_file(&tmp);
+            anyhow::bail!("sha256 mismatch for {file}");
+        }
+        std::fs::rename(&tmp, &path)?;
+    }
+    println!(
+        "\n{} is in {}. To use it, build with `cargo build --release --features onnx`, then in {}:\n\n[embedder]\nkind  = \"onnx\"\nmodel = \"{}\"\n# ort_dylib = \"/path/to/libonnxruntime.so\"   # or set ORT_DYLIB_PATH (e.g. from `pip install onnxruntime`)\n\nand run `unimem reembed` once.",
+        spec.name,
+        dir.display(),
+        Config::default_path().display(),
+        dir.display()
+    );
+    Ok(())
 }
 
 const SAMPLE_CONFIG: &str = r#"# ~/.unimem/config.toml — every field is optional.
@@ -170,7 +224,10 @@ api_key_env = "UNIMEM_LLM_API_KEY"
 timeout_ms  = 15000
 
 [embedder]
-kind  = "hash"                     # "hash" (offline) or "openai" (any /v1/embeddings)
+kind  = "hash"                     # "hash" (offline), "onnx" (local e5; --features onnx) or "openai" (any /v1/embeddings)
+# kind      = "onnx"                       # `unimem models download e5-small` first
+# model     = "~/.unimem/models/multilingual-e5-small"   # default for onnx
+# ort_dylib = "/path/to/libonnxruntime.so" # or ORT_DYLIB_PATH
 # kind     = "openai"
 # base_url = "http://127.0.0.1:11434/v1"   # Ollama
 # model    = "bge-m3"
@@ -313,7 +370,8 @@ async fn main() -> Result<()> {
         Cmd::Recall { query, project, k, cwd, json } => {
             let e = open(&cfg)?;
             let ctx = cli_ctx(&e, cwd);
-            let out = e.recall(&ctx, RecallReq { query, project, k, passive: false }).await?;
+            let depth = if k.is_some() { unimem::engine::Depth::TopK } else { unimem::engine::Depth::Adaptive };
+            let out = e.recall(&ctx, RecallReq { query, project, k: k.unwrap_or(5), passive: false, depth }).await?;
             if json {
                 pj(&out);
                 return Ok(());
@@ -453,6 +511,15 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Models { cmd } => match cmd {
+            ModelsCmd::Download { name, dir } => models_download(&cfg, &name, dir).await,
+            ModelsCmd::List => {
+                let d = cfg.data_dir().join("models").join(unimem::embed::E5_SMALL.dir);
+                println!("e5-small  intfloat/multilingual-e5-small (118M, 384-d, multilingual)  {}", if d.join("model.onnx").exists() { format!("installed: {}", d.display()) } else { "not installed".into() });
+                println!("onnx feature in this build: {}", cfg!(feature = "onnx"));
+                Ok(())
+            }
+        },
         Cmd::Reembed => {
             let e = open(&cfg)?;
             let n = e.reembed().await?;

@@ -590,6 +590,28 @@ impl Store {
         v
     }
 
+    /// [`Self::vec_search`] plus the distribution of the query's cosine over every live note in `scopes`:
+    /// (top-k, mean, standard deviation, number of notes). Used to put cosines of different embedders on one scale.
+    pub fn vec_search_stats(&self, q: &[f32], scopes: &[String], k: usize) -> (Vec<(String, f32)>, f64, f64, usize) {
+        let m = self.vecs.read();
+        let mut all: Vec<(&String, f32)> = m.iter().filter(|(_, e)| e.live && scopes.iter().any(|s| s == &e.scope)).map(|(id, e)| (id, cosine(q, &e.v))).collect();
+        let n = all.len();
+        let (mut s, mut s2) = (0f64, 0f64);
+        for (_, c) in &all {
+            s += *c as f64;
+            s2 += (*c as f64) * (*c as f64);
+        }
+        let mean = if n > 0 { s / n as f64 } else { 0.0 };
+        let var = if n > 1 { ((s2 - n as f64 * mean * mean) / (n as f64 - 1.0)).max(0.0) } else { 0.0 };
+        let cmp = |a: &(&String, f32), b: &(&String, f32)| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(b.0));
+        if k < n {
+            all.select_nth_unstable_by(k, cmp);
+            all.truncate(k);
+        }
+        all.sort_by(cmp);
+        (all.into_iter().map(|(id, c)| (id.clone(), c)).collect(), mean, var.sqrt(), n)
+    }
+
     pub fn embedding(&self, id: &str) -> Option<Vec<f32>> {
         self.vecs.read().get(id).map(|e| e.v.clone())
     }

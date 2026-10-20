@@ -106,13 +106,19 @@ pub struct LlmCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbedderCfg {
-    /// "hash" (offline, zero-setup) or "openai" (any `/v1/embeddings`, e.g. Ollama `bge-m3`).
+    /// "hash" (offline, zero-setup), "onnx" (local transformer, e.g. multilingual-e5-small; needs a build with
+    /// `--features onnx`, `unimem models download e5-small` and ONNX Runtime) or "openai" (any `/v1/embeddings`).
     pub kind: String,
     pub base_url: String,
     pub api_key_env: String,
     pub api_key: Option<String>,
+    /// openai: the model name; onnx: the directory holding `model.onnx` + `tokenizer.json`.
     pub model: String,
     pub dim: usize,
+    /// onnx: path of the ONNX Runtime shared library (`libonnxruntime.so` / `.dylib`); default `$ORT_DYLIB_PATH`.
+    pub ort_dylib: String,
+    /// onnx: intra-op threads (0 = 4).
+    pub threads: usize,
     /// Near-duplicate cosine for this embedder (default per embedder: hash 0.97, e5 0.95).
     pub near_dup_cos: Option<f32>,
     /// Typical cosine of unrelated texts, subtracted before the code-side priors (default: hash 0, e5 0.75).
@@ -224,6 +230,8 @@ impl Default for EmbedderCfg {
             api_key: None,
             model: String::new(),
             dim: 512,
+            ort_dylib: String::new(),
+            threads: 0,
             near_dup_cos: None,
             cos_baseline: None,
         }

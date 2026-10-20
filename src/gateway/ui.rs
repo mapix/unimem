@@ -200,7 +200,7 @@ async fn list_memories(State(st): State<Shared>, Query(q): Query<MemQuery>) -> R
         };
         let project = if ctx.project.is_some() { None } else { Some("all".to_string()) };
         let mut seen: HashSet<String> = HashSet::new();
-        if let Ok(out) = e.recall(&ctx, RecallReq { query: query.to_string(), project, k: 50, passive: false }).await {
+        if let Ok(out) = e.recall(&ctx, RecallReq { query: query.to_string(), project, k: 50, passive: false, depth: crate::engine::Depth::TopK }).await {
             for h in out.notes {
                 if let Some(m) = e.store.get_memory(&h.id).filter(|m| keep(m)) {
                     let mut v = mem_json(&m, &lab);
@@ -519,7 +519,7 @@ async fn recall(State(st): State<Shared>, Json(b): Json<RecallBody>) -> Response
     let extra = if b.project.as_deref() == Some("all") { Some("all".to_string()) } else { None };
     let passive = b.passive.unwrap_or(true);
     let k = b.k.unwrap_or(e.cfg.inject.max_recall_notes);
-    let out = match e.recall(&ctx, RecallReq { query: truncate_chars(&b.query, 2000), project: extra, k, passive }).await {
+    let out = match e.recall(&ctx, RecallReq { query: truncate_chars(&b.query, 2000), project: extra, k, passive, ..Default::default() }).await {
         Ok(o) => o,
         Err(x) => return err(StatusCode::INTERNAL_SERVER_ERROR, x.to_string()),
     };
@@ -761,7 +761,7 @@ pub async fn demo_seed(e: &Engine, dir: &std::path::Path) -> anyhow::Result<usiz
         }
     }
     for (k, q) in [("P", "where are idempotency keys stored and for how long?"), ("A", "how do I format money amounts in the dashboard?"), ("T", "how do I backfill a partition?")] {
-        let _ = e.recall(&ctxs[k], RecallReq { query: q.into(), project: None, k: 5, passive: false }).await;
+        let _ = e.recall(&ctxs[k], RecallReq { query: q.into(), project: None, k: 5, passive: false, ..Default::default() }).await;
     }
     e.store.meta_set("demo_seeded", &now.to_string())?;
     Ok(DEMO_MEMS.len())

@@ -3,7 +3,9 @@
 //!
 //! ```text
 //! unimem-std-bench run    --cache DIR --dataset lme|locomo --gran turn|session --systems a,b,c [--budget SECS] [--limit N]
-//! unimem-std-bench report --cache DIR --out bench/std/results
+//! unimem-std-bench report --cache DIR --out bench/std/results [--split all|dev|test]
+//! unimem-std-bench evidence --cache DIR --dataset lme --gran turn|session --embedder hash|e5 --out FILE.jsonl (dev split)
+//! unimem-std-bench split  --cache DIR                       (LongMemEval question id → dev|test)
 //! unimem-std-bench dump   --cache DIR --dataset lme|locomo --gran turn|session --system S [--k 50] --out FILE.jsonl
 //! unimem-std-bench verify-onnx --cache DIR --model DIR      (needs `--features onnx` and ORT_DYLIB_PATH)
 //! ```
@@ -43,11 +45,29 @@ use std::time::Instant;
 use unimem::config::Config;
 use unimem::decide::ChainDecider;
 use unimem::embed::{Embedder, HashEmbedder};
-use unimem::engine::{relevance_prior, Ctx, Engine, Evidence, RecallReq, WriteOutcome, WriteReq};
+use unimem::engine::{Ctx, Depth, Engine, RecallReq, WriteOutcome, WriteReq};
 use unimem::store::{cosine, Memory, Source, Store};
+use sha2::{Digest, Sha256};
 
 const KS: [usize; 7] = [1, 3, 5, 10, 25, 30, 50];
 const RECALL_K: usize = 10;
+/// Depth of the `unimem-topk-*` systems (ranking mode): enough for every reported k.
+const TOPK_K: usize = 50;
+
+/// Development / test split of LongMemEval_S, fixed before any fitting: a question is in the development split when
+/// the first byte of sha256(question_id) is even, else in the test split. Only the development split was used to fit
+/// the relevance prior (`bench/std/fit_prior.py`); headline numbers are on the test split. LoCoMo was not used for
+/// fitting at all, so all of it is test data.
+pub fn split_of(dataset: &str, qid: &str) -> &'static str {
+    if dataset != "lme" {
+        return "test";
+    }
+    if Sha256::digest(qid.as_bytes())[0] % 2 == 0 {
+        "dev"
+    } else {
+        "test"
+    }
+}
 const E5_DIM: usize = 384;
 
 // ============================================================================ data
@@ -476,7 +496,17 @@ enum Index {
     Dense { docs: Vec<Vec<f32>>, e5: bool },
     Hybrid(Bm25, Vec<Vec<f32>>),
     /// `ids` maps memory id → unit indices (several when the write path merged duplicates)
-    Engine { engine: Box<Engine>, ids: HashMap<String, Vec<usize>>, prior_only: bool, stats: Value },
+    Engine { engine: Box<Engine>, ids: HashMap<String, Vec<usize>>, mode: EngineMode, stats: Value },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum EngineMode {
+    /// `unimem-prior-*`: the engine's anchor ranking (`Engine::candidates`), no decider, no cut-off
+    Rank,
+    /// `unimem-topk-*`: `Engine::recall` with `Depth::TopK` (k = 50)
+    TopK,
+    /// `unimem-*`: `Engine::recall` with the adaptive cut-off (k = 10), as injected
+    Adaptive,
 }
 
 fn mem_for(u: &Unit, id: String) -> Memory {
@@ -515,7 +545,13 @@ async fn build(sys: &str, corpus: &Corpus, sh: &Shared) -> Result<Index> {
         s if s.starts_with("unimem-") => {
             let e5 = s.ends_with("-e5");
             let write = s.starts_with("unimem-write-");
-            let prior_only = s.starts_with("unimem-prior-");
+            let mode = if s.starts_with("unimem-prior-") {
+                EngineMode::Rank
+            } else if s.starts_with("unimem-topk-") {
+                EngineMode::TopK
+            } else {
+                EngineMode::Adaptive
+            };
             let store = Store::open_memory()?;
             let embedder: Box<dyn Embedder> = if e5 {
                 let (p, q) = (sh.e5p.clone().ok_or_else(|| anyhow!("no e5"))?, sh.e5q.clone().ok_or_else(|| anyhow!("no e5"))?);
@@ -557,51 +593,16 @@ async fn build(sys: &str, corpus: &Corpus, sh: &Shared) -> Result<Index> {
                     ids.insert(id, vec![i]);
                 }
             }
-            Index::Engine { engine: Box::new(engine), ids, prior_only, stats }
+            Index::Engine { engine: Box::new(engine), ids, mode, stats }
         }
         _ => bail!("unknown system {sys}"),
     })
 }
 
-/// The engine's own candidate scoring (anchors = BM25 top-30 ∪ cosine top-30, calibrated `relevance_prior`)
-/// without the adaptive cut-off, so that Recall@k is measured on a full top-k list.
+/// The engine's own candidate ranking (anchors = BM25 top-n ∪ cosine top-n, `relevance_prior`) without the
+/// decider round-trip and the cut-off, so that Recall@k is measured on a full ranked list.
 async fn engine_prior_rank(engine: &Engine, q: &str) -> Result<Vec<String>> {
-    const ANCHOR_K: usize = 30;
-    let scopes = vec!["global".to_string()];
-    let qemb = engine.embedder.embed_one(q).await?;
-    let lex = engine.store.lex_search(q, &scopes, ANCHOR_K);
-    let vs = engine.store.vec_search(&qemb, &scopes, ANCHOR_K, false);
-    let max_lex = lex.first().map(|h| h.score).unwrap_or(0.0).max(1e-9);
-    let max_cos = vs.first().map(|x| x.1 as f64).unwrap_or(0.0).max(1e-9);
-    let mut ev: HashMap<String, Evidence> = HashMap::new();
-    for h in &lex {
-        let e = ev.entry(h.id.clone()).or_default();
-        e.coverage = h.coverage;
-        e.lex_rel = h.score / max_lex;
-    }
-    for (id, c) in &vs {
-        let e = ev.entry(id.clone()).or_default();
-        e.cos = (*c as f64).max(0.0);
-        e.cos_rel = e.cos / max_cos;
-    }
-    let max_cov = ev.values().map(|e| e.coverage).fold(0.0, f64::max).max(1e-9);
-    let wants_reason = unimem::screen::asks_why(q);
-    let mut prior: Vec<(String, f64)> = vec![];
-    for (id, e) in ev.iter_mut() {
-        e.cov_rel = e.coverage / max_cov;
-        if e.cos == 0.0 {
-            e.cos = cosine(&qemb, &engine.store.embedding(id).unwrap_or_default()).max(0.0) as f64;
-            e.cos_rel = e.cos / max_cos;
-        }
-        if wants_reason {
-            if let Some(m) = engine.store.get_memory(id) {
-                e.reason_match = unimem::screen::explains(&m.content) || unimem::screen::is_reason_note(&m.content) || m.why.is_some();
-            }
-        }
-        prior.push((id.clone(), relevance_prior(e)));
-    }
-    prior.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then_with(|| a.0.cmp(&b.0)));
-    Ok(prior.into_iter().map(|p| p.0).collect())
+    Ok(engine.candidates(q, &["global".to_string()], TOPK_K).await?.into_iter().map(|c| c.id).collect())
 }
 
 async fn search(ix: &Index, q: &str, sh: &Shared, n: usize) -> Result<(Vec<usize>, Value)> {
@@ -619,11 +620,12 @@ async fn search(ix: &Index, q: &str, sh: &Shared, n: usize) -> Result<(Vec<usize
             let (r1, r2) = (argsort_desc(&b.scores(q)), argsort_desc(&d));
             (rrf(&[&r1, &r2], n), Value::Null)
         }
-        Index::Engine { engine, ids, prior_only, stats } => {
-            let (mids, extra) = if *prior_only {
+        Index::Engine { engine, ids, mode, stats } => {
+            let (mids, extra) = if *mode == EngineMode::Rank {
                 (engine_prior_rank(engine, q).await?, Value::Null)
             } else {
-                let out = engine.recall(&Ctx::default(), RecallReq { query: q.to_string(), k: RECALL_K, ..Default::default() }).await?;
+                let (k, depth) = if *mode == EngineMode::TopK { (TOPK_K, Depth::TopK) } else { (RECALL_K, Depth::Adaptive) };
+                let out = engine.recall(&Ctx::default(), RecallReq { query: q.to_string(), k, depth, ..Default::default() }).await?;
                 let via: Vec<String> = out.notes.iter().map(|h| h.via.clone()).collect();
                 (out.notes.iter().map(|h| h.id.clone()).collect(), json!({"returned": out.notes.len(), "mode": out.mode, "sufficient": out.sufficient, "via": via}))
             };
@@ -713,8 +715,12 @@ fn metrics(rank: &[usize], corpus: &Corpus, case: &Case, dataset: &str, gran: &s
 
 // ============================================================================ run / report
 
+fn runs_dir(cache: &Path) -> PathBuf {
+    cache.join(std::env::var("UNIMEM_STD_RUNS").unwrap_or("runs".into()))
+}
+
 fn run_path(cache: &Path, dataset: &str, gran: &str, sys: &str) -> PathBuf {
-    cache.join(format!("runs/{dataset}-{gran}-{sys}.jsonl"))
+    runs_dir(cache).join(format!("{dataset}-{gran}-{sys}.jsonl"))
 }
 
 fn done_set(p: &Path) -> HashSet<String> {
@@ -777,7 +783,7 @@ async fn cmd_run(cache: &Path, dataset: &str, gran: &str, systems: &[String], bu
     let (corpora, info) = load(cache, dataset, gran, false)?;
     let sh = shared_for(cache, dataset, gran, systems)?;
     eprintln!("loaded {dataset}/{gran}: {} corpora, {} cases ({info}) in {:.1}s", corpora.len(), corpora.iter().map(|c| c.cases.len()).sum::<usize>(), t0.elapsed().as_secs_f64());
-    std::fs::create_dir_all(cache.join("runs"))?;
+    std::fs::create_dir_all(runs_dir(cache))?;
     let mut n_cases = 0;
     'outer: for sys in systems {
         let path = run_path(cache, dataset, gran, sys);
@@ -807,7 +813,7 @@ async fn cmd_run(cache: &Path, dataset: &str, gran: &str, systems: &[String], bu
                 let search_ms = ts.elapsed().as_secs_f64() * 1000.0;
                 let m = metrics(&rank, corpus, case, dataset, gran);
                 let top: Vec<&str> = rank.iter().take(50).map(|&i| corpus.units[i].id.as_str()).collect();
-                let rec = json!({"qid": case.qid, "cat": case.cat, "n_units": corpus.units.len(), "n_gold": case.gold.len(),
+                let rec = json!({"qid": case.qid, "split": split_of(dataset, &case.qid), "cat": case.cat, "n_units": corpus.units.len(), "n_gold": case.gold.len(),
                     "metrics": m, "top": top, "extra": extra, "build_ms": build_ms, "search_ms": search_ms});
                 writeln!(out, "{rec}")?;
                 new += 1;
@@ -832,16 +838,21 @@ fn mean(v: &[f64]) -> f64 {
     }
 }
 
-fn cmd_report(cache: &Path, out: &Path) -> Result<()> {
+fn cmd_report(cache: &Path, out: &Path, split: &str) -> Result<()> {
     std::fs::create_dir_all(out)?;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(cache.join("runs"))?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(runs_dir(cache))?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).collect();
     files.sort();
     let mut all: BTreeMap<String, Value> = BTreeMap::new();
     for f in &files {
         let name = f.file_stem().unwrap().to_string_lossy().to_string();
         let (dataset, rest) = name.split_once('-').unwrap_or(("?", ""));
         let (gran, sys) = rest.split_once('-').unwrap_or(("?", ""));
-        let recs: Vec<Value> = std::io::BufReader::new(std::fs::File::open(f)?).lines().map_while(|l| l.ok()).filter_map(|l| serde_json::from_str(&l).ok()).collect();
+        let recs: Vec<Value> = std::io::BufReader::new(std::fs::File::open(f)?)
+            .lines()
+            .map_while(|l| l.ok())
+            .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
+            .filter(|r| split == "all" || split_of(dataset, r["qid"].as_str().unwrap_or("")) == split)
+            .collect();
         // group: overall + per category; metric: level/name
         let mut agg: BTreeMap<String, BTreeMap<String, Vec<f64>>> = BTreeMap::new();
         let mut returned = vec![];
@@ -905,14 +916,18 @@ fn cmd_report(cache: &Path, out: &Path) -> Result<()> {
     for ds in ["lme", "locomo"] {
         let v: BTreeMap<&String, &Value> = all.iter().filter(|(_, e)| e["dataset"] == ds).collect();
         if !v.is_empty() {
-            let name = if ds == "lme" { "longmemeval_s_retrieval.json" } else { "locomo_retrieval.json" };
+            let name = if ds == "lme" { "longmemeval_s_retrieval" } else { "locomo_retrieval" };
+            let name = if split == "all" { format!("{name}.json") } else { format!("{name}.{split}.json") };
             std::fs::write(out.join(name), serde_json::to_string_pretty(&v)?)?;
         }
     }
     // markdown tables
     let mut md = String::new();
     let g = |e: &Value, grp: &str, key: &str| -> String { e["groups"][grp][key].as_f64().map(|x| format!("{x:.3}")).unwrap_or("–".into()) };
-    let order = ["bm25-okapi-ref", "bm25", "hash-dense", "e5-small", "hybrid-rrf", "unimem-hash", "unimem-prior-hash", "unimem-e5", "unimem-prior-e5", "unimem-write-hash", "unimem-write-e5"];
+    let order = [
+        "bm25-okapi-ref", "bm25", "hash-dense", "e5-small", "hybrid-rrf", "unimem-prior-hash", "unimem-prior-e5", "unimem-topk-hash", "unimem-topk-e5", "unimem-hash", "unimem-e5", "unimem-write-hash",
+        "unimem-write-e5",
+    ];
     let sorted = |ds: &str, gran: &str| -> Vec<&Value> {
         let mut v: Vec<&Value> = all.values().filter(|e| e["dataset"] == ds && e["granularity"] == gran).collect();
         v.sort_by_key(|e| order.iter().position(|o| e["system"] == *o).unwrap_or(99));
@@ -989,7 +1004,8 @@ fn cmd_report(cache: &Path, out: &Path) -> Result<()> {
             ));
         }
     }
-    std::fs::write(out.join("tables.md"), &md)?;
+    let md = format!("<!-- split: {split} (LongMemEval: dev = sha256(question_id)[0] even; LoCoMo is all test) -->\n{md}");
+    std::fs::write(out.join(if split == "all" { "tables.md".to_string() } else { format!("tables.{split}.md") }), &md)?;
     println!("{md}");
     Ok(())
 }
@@ -1027,6 +1043,44 @@ async fn cmd_verify_onnx(cache: &Path, model: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Candidate evidence of the engine's anchor stage, with gold labels, for the development split only (input of
+/// `bench/std/fit_prior.py`). Test-split questions are never written.
+async fn cmd_evidence(cache: &Path, dataset: &str, gran: &str, emb: &str, out: &Path, budget: f64) -> Result<()> {
+    let (corpora, _) = load(cache, dataset, gran, false)?;
+    let sys = format!("unimem-prior-{emb}");
+    let sh = shared_for(cache, dataset, gran, std::slice::from_ref(&sys))?;
+    // resumable: questions already in `out` are skipped; stops after `budget` seconds
+    let done = done_set(out);
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(out)?;
+    let mut n = 0;
+    let t0 = Instant::now();
+    for corpus in &corpora {
+        if t0.elapsed().as_secs_f64() > budget {
+            eprintln!("budget reached");
+            break;
+        }
+        let cases: Vec<&Case> = corpus.cases.iter().filter(|c| split_of(dataset, &c.qid) == "dev" && !done.contains(&c.qid)).collect();
+        if cases.is_empty() {
+            continue;
+        }
+        let Index::Engine { engine, ids, .. } = build(&sys, corpus, &sh).await? else { bail!("not an engine system") };
+        for case in cases {
+            let cands = engine.candidates(&case.query, &["global".to_string()], 30).await?;
+            let rows: Vec<Value> = cands
+                .iter()
+                .map(|c| {
+                    let y = ids.get(&c.id).is_some_and(|v| v.iter().any(|&i| case.gold.contains(&corpus.units[i].id)));
+                    json!({"y": y as u8, "ev": c.ev})
+                })
+                .collect();
+            writeln!(f, "{}", json!({"qid": case.qid, "cat": case.cat, "n_gold": case.gold.len(), "cands": rows}))?;
+            n += 1;
+        }
+    }
+    eprintln!("wrote evidence for {n} more dev questions ({} total) to {}", n + done.len(), out.display());
+    Ok(())
+}
+
 fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
 }
@@ -1045,6 +1099,16 @@ async fn main() -> Result<()> {
             let limit: usize = arg(&args, "--limit").and_then(|b| b.parse().ok()).unwrap_or(usize::MAX);
             cmd_run(&cache, &dataset, &gran, &systems, budget, limit).await
         }
+        "split" => {
+            // list the split of every LongMemEval question id (for the Python analysis scripts)
+            let (corpora, _) = load(&cache, "lme", "session", true)?;
+            for c in &corpora {
+                for case in &c.cases {
+                    println!("{}\t{}", case.qid, split_of("lme", &case.qid));
+                }
+            }
+            Ok(())
+        }
         "dump" => {
             let dataset = arg(&args, "--dataset").unwrap_or("lme".into());
             let gran = arg(&args, "--gran").unwrap_or("turn".into());
@@ -1053,11 +1117,19 @@ async fn main() -> Result<()> {
             let out = PathBuf::from(arg(&args, "--out").unwrap_or(format!("{dataset}-{gran}-{sys}.retrieval.jsonl")));
             cmd_dump(&cache, &dataset, &gran, &sys, k, &out).await
         }
-        "report" => cmd_report(&cache, &PathBuf::from(arg(&args, "--out").unwrap_or("bench/std/results".into()))),
+        "report" => cmd_report(&cache, &PathBuf::from(arg(&args, "--out").unwrap_or("bench/std/results".into())), &arg(&args, "--split").unwrap_or("all".into())),
+        "evidence" => {
+            let dataset = arg(&args, "--dataset").unwrap_or("lme".into());
+            let gran = arg(&args, "--gran").unwrap_or("turn".into());
+            let emb = arg(&args, "--embedder").unwrap_or("hash".into());
+            let out = PathBuf::from(arg(&args, "--out").ok_or_else(|| anyhow!("--out FILE"))?);
+            let budget: f64 = arg(&args, "--budget").and_then(|b| b.parse().ok()).unwrap_or(f64::MAX);
+            cmd_evidence(&cache, &dataset, &gran, &emb, &out, budget).await
+        }
         #[cfg(feature = "onnx")]
         "verify-onnx" => cmd_verify_onnx(&cache, &PathBuf::from(arg(&args, "--model").ok_or_else(|| anyhow!("--model DIR"))?)).await,
         _ => {
-            eprintln!("usage: unimem-std-bench run|report|dump|verify-onnx --cache DIR [--dataset lme|locomo] [--gran turn|session] [--systems a,b] [--budget s] [--limit n] [--out dir] [--model dir]");
+            eprintln!("usage: unimem-std-bench run|report|dump|evidence|split|verify-onnx --cache DIR [--dataset lme|locomo] [--gran turn|session] [--systems a,b] [--budget s] [--limit n] [--out dir] [--model dir]");
             Ok(())
         }
     }
