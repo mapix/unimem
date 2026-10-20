@@ -83,7 +83,58 @@ pub fn router(state: Shared) -> Router {
         .route("/unimem/remember", post(api_remember))
         .merge(ui::routes())
         .fallback(passthrough)
+        .layer(axum::middleware::from_fn(browser_guard))
         .with_state(state)
+}
+
+// ---------------------------------------------------------------- browser guard
+
+fn is_loopback_host(host: &str) -> bool {
+    let h = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    h == "localhost" || h.ends_with(".localhost") || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Host part of an `Origin` / `Host` value (`scheme://host:port`, `host:port`, `[v6]:port`).
+fn host_part(v: &str) -> &str {
+    let v = v.split_once("://").map_or(v, |(_, rest)| rest);
+    let v = v.split('/').next().unwrap_or("");
+    if let Some(rest) = v.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or("");
+    }
+    v.rsplit_once(':').filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit())).map_or(v, |(h, _)| h)
+}
+
+/// Why a request must be refused as coming from a web page rather than a local client (`None` = allowed).
+///
+/// The gateway has no authentication, so a page open in the user's browser could otherwise reach it: a cross-site
+/// `text/plain` POST to `/mcp` needs no CORS preflight (memory poisoning), and a DNS-rebinding page can read
+/// `/ui/api/*`. Harnesses and CLIs send no `Origin`; the web UI's own requests carry a loopback origin.
+pub fn browser_block_reason(h: &HeaderMap) -> Option<&'static str> {
+    if std::env::var_os("UNIMEM_ALLOW_ANY_ORIGIN").is_some_and(|v| v == "1") {
+        return None;
+    }
+    let host = h.get("host").and_then(|v| v.to_str().ok()).map(host_part).unwrap_or("");
+    if let Some(o) = h.get("origin") {
+        let o = o.to_str().unwrap_or("null");
+        let oh = host_part(o);
+        // same-origin (the UI opened via the listen address) or any loopback page
+        if o == "null" || !(is_loopback_host(oh) || (!oh.is_empty() && oh.eq_ignore_ascii_case(host))) {
+            return Some("cross-origin request refused");
+        }
+    }
+    // DNS rebinding needs a domain name; IP literals (LAN binds) and loopback names are fine
+    if !host.is_empty() && host.parse::<std::net::IpAddr>().is_err() && !is_loopback_host(host) {
+        return Some("non-local Host refused (DNS rebinding protection)");
+    }
+    None
+}
+
+async fn browser_guard(req: Request, next: axum::middleware::Next) -> Response {
+    if let Some(why) = browser_block_reason(req.headers()) {
+        tracing::warn!(origin = ?req.headers().get("origin"), host = ?req.headers().get("host"), "{why}");
+        return (StatusCode::FORBIDDEN, format!("unimem: {why}; set UNIMEM_ALLOW_ANY_ORIGIN=1 to disable this check")).into_response();
+    }
+    next.run(req).await
 }
 
 // ---------------------------------------------------------------- request context
@@ -193,23 +244,27 @@ pub fn response_headers(h: &reqwest::header::HeaderMap) -> HeaderMap {
 }
 
 /// Decode a request body (Codex may zstd-compress it).
+///
+/// The decoded size is capped at [`MAX_DECODED_BODY`] (a compressed body can expand by orders of magnitude); above
+/// it decoding fails and the caller passes the original bytes through unchanged (fail-open).
 pub fn decode_body(h: &HeaderMap, b: &[u8]) -> anyhow::Result<Vec<u8>> {
     use std::io::Read;
+    fn capped(mut r: impl Read) -> anyhow::Result<Vec<u8>> {
+        let mut s = vec![];
+        (&mut r).take(MAX_DECODED_BODY as u64 + 1).read_to_end(&mut s)?;
+        anyhow::ensure!(s.len() <= MAX_DECODED_BODY, "decoded request body exceeds {MAX_DECODED_BODY} bytes");
+        Ok(s)
+    }
     match h.get("content-encoding").and_then(|v| v.to_str().ok()).map(|s| s.to_lowercase()) {
-        Some(e) if e == "zstd" => Ok(zstd::decode_all(b)?),
-        Some(e) if e == "gzip" => {
-            let mut s = vec![];
-            flate2::read::GzDecoder::new(b).read_to_end(&mut s)?;
-            Ok(s)
-        }
-        Some(e) if e == "deflate" => {
-            let mut s = vec![];
-            flate2::read::ZlibDecoder::new(b).read_to_end(&mut s)?;
-            Ok(s)
-        }
+        Some(e) if e == "zstd" => capped(zstd::stream::read::Decoder::new(b)?),
+        Some(e) if e == "gzip" => capped(flate2::read::GzDecoder::new(b)),
+        Some(e) if e == "deflate" => capped(flate2::read::ZlibDecoder::new(b)),
         _ => Ok(b.to_vec()),
     }
 }
+
+/// Upper bound for a decompressed request body (see [`decode_body`]).
+pub const MAX_DECODED_BODY: usize = 256 * 1024 * 1024;
 
 pub fn join_url(base: &str, path: &str, query: Option<&str>) -> String {
     let mut u = format!("{}{}", base.trim_end_matches('/'), path);
@@ -491,5 +546,51 @@ mod tests {
         assert_ne!(a, exp_anchor("sess-2", "u:prev", "vis"));
         assert_ne!(a, exp_anchor("sess-1", "u:other", "vis"));
         assert_eq!(a, exp_anchor("sess-1", "u:prev", "vis"));
+    }
+
+    #[test]
+    fn browser_guard_blocks_foreign_origins_and_rebinding_hosts() {
+        let h = |pairs: &[(&'static str, &'static str)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.insert(*k, HeaderValue::from_static(v));
+            }
+            m
+        };
+        // harness / CLI traffic: no Origin, loopback or IP Host
+        assert!(browser_block_reason(&h(&[("host", "127.0.0.1:4777")])).is_none());
+        assert!(browser_block_reason(&h(&[("host", "localhost:4777")])).is_none());
+        assert!(browser_block_reason(&h(&[("host", "[::1]:4777")])).is_none());
+        assert!(browser_block_reason(&h(&[("host", "192.168.1.5:4777")])).is_none());
+        assert!(browser_block_reason(&HeaderMap::new()).is_none());
+        // the web UI's own fetches
+        assert!(browser_block_reason(&h(&[("host", "127.0.0.1:4777"), ("origin", "http://127.0.0.1:4777")])).is_none());
+        assert!(browser_block_reason(&h(&[("host", "localhost:4777"), ("origin", "http://localhost:4777")])).is_none());
+        // a web page posting cross-site, an opaque origin, a DNS-rebinding Host
+        assert!(browser_block_reason(&h(&[("host", "127.0.0.1:4777"), ("origin", "https://evil.example")])).is_some());
+        assert!(browser_block_reason(&h(&[("host", "127.0.0.1:4777"), ("origin", "null")])).is_some());
+        // the UI opened through a LAN address is same-origin; another LAN page is not
+        assert!(browser_block_reason(&h(&[("host", "192.168.1.5:4777"), ("origin", "http://192.168.1.5:4777")])).is_none());
+        assert!(browser_block_reason(&h(&[("host", "192.168.1.5:4777"), ("origin", "http://192.168.1.9")])).is_some());
+        assert!(browser_block_reason(&h(&[("host", "evil.example:4777")])).is_some());
+        assert!(browser_block_reason(&h(&[("host", "127.0.0.1.evil.example:4777")])).is_some());
+        assert_eq!(host_part("http://[::1]:4777"), "::1");
+        assert_eq!(host_part("localhost"), "localhost");
+    }
+
+    #[test]
+    fn decode_body_roundtrips_and_caps_decompression_bombs() {
+        use std::io::Read;
+        let mut h = HeaderMap::new();
+        h.insert("content-encoding", HeaderValue::from_static("zstd"));
+        let small = zstd::encode_all(&b"{\"a\":1}"[..], 3).unwrap();
+        assert_eq!(decode_body(&h, &small).unwrap(), b"{\"a\":1}");
+        // ~260 MB of zeros compresses to a few KB; decoding must stop at the cap instead of allocating it all
+        let bomb = zstd::encode_all(std::io::repeat(0).take(MAX_DECODED_BODY as u64 + 4096), 19).unwrap();
+        assert!(bomb.len() < 1 << 20);
+        assert!(decode_body(&h, &bomb).is_err());
+        h.insert("content-encoding", HeaderValue::from_static("gzip"));
+        assert!(decode_body(&h, b"not gzip").is_err());
+        assert_eq!(decode_body(&HeaderMap::new(), b"raw").unwrap(), b"raw");
     }
 }

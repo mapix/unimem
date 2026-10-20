@@ -81,8 +81,8 @@ gh release upload v0.4.0 unimem-v0.4.0-$(uname -m)-apple-darwin.tar.gz
 
 ## 4. After pushing
 
-- Check that the CI run on the Actions tab is green. The `rustfmt` and `onnx` jobs are allowed to fail. Once the
-  one-off `cargo fmt` commit has landed, remove `continue-on-error` from the `fmt` job.
+- Check that the CI run on the Actions tab is green. Only the `onnx` job is allowed to fail (`continue-on-error`);
+  `rustfmt` is enforced.
 - Settings → Code security: enable **private vulnerability reporting** (`SECURITY.md` links to it), Dependabot
   alerts, and secret scanning.
 - Settings → Branches: protect `main` and require the `clippy` and `test` checks.

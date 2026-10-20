@@ -12,6 +12,18 @@ out-of-sample `heldout2` set unless noted otherwise. Details: `bench/results/`.
 ### Added
 - Open-source readiness: this README, the license, contributing and security docs, a CI workflow, issue and PR
   templates, and a commented `examples/config.toml`.
+- v0.5 engine work (commit `7c8742a`; the crate version is still 0.4.0): the relevance prior uses a z-scored cosine
+  and an RRF term, with weights fitted per embedder family on dev data only (`PRIOR_HASH`, `PRIOR_DENSE`);
+  `Depth::TopK` ranking mode for explicit `k` (agent tool, CLI `-k`, UI, `/api/recall`); the ONNX e5 embedder as a
+  production option (`unimem models download e5-small`). Results: `bench/std/RESULTS.md` §7 and `bench/results/v0.5/`.
+- Pre-release audit (`docs/AUDIT.md`): requests from web pages are refused (foreign `Origin`, or a non-local `Host`
+  as used by DNS rebinding; override with `UNIMEM_ALLOW_ANY_ORIGIN=1`); decompressed request bodies are capped at
+  256 MB; the MCP session map is bounded.
+
+### Results (v0.5)
+- LongMemEval_S test split / LoCoMo: the e5 ranker is level with or above BM25+e5 RRF (LoCoMo R@10 +0.035,
+  95% CI [+0.022, +0.047]; LongMemEval turn R@10 +0.025, borderline).
+- heldout2 (hash, adaptive): R@1 0.555, R@5 0.693, MRR 0.617, cross-harness R@5 0.671.
 
 ## [0.4.0] — 2026-10-21
 
@@ -72,7 +84,7 @@ Implements the P0/P1 findings of the design review (`docs/REVIEW.md`).
   injection); a `sufficient` / `missing` signal on recall.
 - `hash2-512` offline embedder: stems, compound-identifier parts and bilingual concept features (`lexicon.rs`).
 - Out-of-sample evaluation set `heldout2` (a new developer, 6 new repos, a new harness), the final evaluation
-  (`bench/results/FINAL.md`), and a technical report (`docs/paper.md`).
+  (`bench/results/FINAL.md`), and a technical report (then `docs/paper.md`, now `docs/paper/unimem.tex`).
 
 ### Changed
 - Renamed the project from `uni-mem` to `unimem`.

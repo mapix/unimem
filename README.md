@@ -12,7 +12,7 @@ they all share one memory. A correction you gave Claude Code in the morning is k
 is filed under the right repository.
 
 > [!WARNING]
-> **unimem is research-grade software (v0.4).** It has been tested against mock upstreams and synthetic benchmarks,
+> **unimem is research-grade software (crate v0.4.0, engine v0.5).** It has been tested against mock upstreams and synthetic benchmarks,
 > **not against real Claude Code / Codex traffic over long periods.** Read
 > [Status & known limitations](#status--known-limitations) before routing your daily work through it.
 
@@ -269,21 +269,27 @@ code exactly (max per-question difference 1e-16).
 | stemmed BM25 | 0.924 | 0.754 |
 | multilingual-e5-small (118M) | 0.969 | 0.835 |
 | BM25 + e5, RRF | **0.971** | **0.838** |
-| unimem ranking (`relevance_prior`, e5) | 0.938 | 0.783 |
+| unimem ranking v0.4 (`relevance_prior`, e5) | 0.938 | 0.783 |
+| unimem ranking v0.5 (refitted prior, e5) | **0.979** | **0.862** |
 | unimem `recall` as shipped (returns ~2–3 notes) | 0.618 | 0.465 |
 
 | LoCoMo (locomo10), evidence recall, categories 1–4 | R@5 | R@10 |
 |---|---|---|
 | stemmed BM25 | 0.470 | 0.553 |
-| BM25 + e5, RRF | 0.551 | **0.629** |
-| unimem ranking (e5) | 0.542 | 0.619 |
+| BM25 + e5, RRF | 0.551 | 0.629 |
+| unimem ranking v0.4 (e5) | 0.542 | 0.619 |
+| unimem ranking v0.5 (e5) | **0.595** | **0.663** |
 
 What the numbers say:
 
-- **unimem's ranker is a solid lexical-hybrid ranker.** On LongMemEval it ties a well-tuned BM25, and on LoCoMo it is
-  roughly level with BM25+e5 RRF.
-- **It is significantly behind dense retrieval on paraphrase-heavy questions.** On LongMemEval it trails hybrid-rrf
-  by −0.055 turn R@10 (95% CI [−0.079, −0.033]).
+- **v0.4: a solid lexical-hybrid ranker, but behind dense retrieval.** On LongMemEval it trailed hybrid-rrf by
+  −0.055 turn R@10 (95% CI [−0.079, −0.033]).
+- **v0.5 (current code): level with or above BM25+e5 RRF when run with e5.** The prior was refitted per embedder on a
+  dev split only; on the held-out test split (203 LongMemEval questions, all of LoCoMo) it is significantly better on
+  LoCoMo (R@10 +0.035, CI [+0.022, +0.047]) and ahead but borderline on LongMemEval turns (+0.025, CI [+0.000,
+  +0.054]). With the default offline hash embedder it still loses to hybrid-rrf on LongMemEval (−0.079 turn R@10).
+  The v0.5 rows above are on all 419 questions, including the dev half used for fitting; see RESULTS.md §7 for the
+  test-split numbers.
 - **`recall` is not a top-k retriever.** It deliberately returns 1.7–3.5 notes for prompt injection, so its R@10
   is effectively an R@3. Cut every baseline at the same depth and it keeps up.
 - Not done yet: end-to-end QA, which needs an LLM reader and judge (the script is ready), and LongMemEval_M.
@@ -294,15 +300,16 @@ Full reports: [bench/results/FINAL.md](bench/results/FINAL.md) (v0.1–v0.3) and
 [bench/results/v0.4/SUMMARY.md](bench/results/v0.4/SUMMARY.md). E1 numbers are from the **out-of-sample** `heldout2`
 set (242 queries, 233 notes, 6 repos, 3 harnesses).
 
-| E1, memory quality | unimem v0.4 | top-5 cosine, same embedder, cwd-scoped | BM25 top-5, cwd-scoped | per-harness silo |
+| E1, memory quality | unimem v0.5 (v0.3/v0.4) | top-5 cosine, same embedder, cwd-scoped | BM25 top-5, cwd-scoped | per-harness silo |
 |---|---|---|---|---|
-| R@1 / R@5 / MRR | **0.555** / **0.688** / **0.616** | 0.390 / 0.670 / 0.506 | 0.413 / 0.615 / 0.497 | 0.243 / 0.271 / 0.257 |
-| precision (notes returned per query) | **0.423** (1.6) | 0.134 (5) | 0.152 (4.0) | 0.242 (1.1) |
+| R@1 / R@5 / MRR | **0.555** / **0.693** / **0.617** (0.555 / 0.688 / 0.616) | 0.390 / 0.670 / 0.506 | 0.413 / 0.615 / 0.497 | 0.239 / 0.271 / 0.254 |
+| precision (notes returned per query) | **0.424** (1.6) | 0.134 (5) | 0.152 (4.0) | 0.238 (1.2) |
 | stale note returned | **16.3%** | 58.1% | 55.8% | 16.3% |
-| cross-harness R@5 | **0.664** | 0.664 | 0.600 | 0.000 |
+| cross-harness R@5 | **0.671** (0.664) | 0.664 | 0.600 | 0.000 |
 
-- The R@5 gain over a plain top-5 cosine search is **not significant** (+0.018, CI [−0.037, +0.073]). The real wins
-  are in precision, R@1 and avoiding stale notes.
+- The R@5 gain over a plain top-5 cosine search is **not significant** (v0.5: +0.023, CI [−0.032, +0.078]; v0.3:
+  +0.018, CI [−0.037, +0.073]). The real wins are in precision, R@1 and avoiding stale notes. Re-running
+  `unimem-bench e1 --data bench/data/heldout2.json` on the current code reproduces the v0.5 column exactly.
 - **E2, gateway.** Added latency over a direct connection: +1.15 ms p50 / +3.1 ms p95 TTFB when streaming with recall,
   and +0.37 ms for JSON. All 1060/1060 interception assertions pass (the harness never sees a unimem tool or context,
   framing is valid, replay is byte-identical, the system prompt is untouched). Prompt cache: 42/42 fully
@@ -310,6 +317,8 @@ set (242 queries, 233 notes, 6 repos, 3 harnesses).
 - **E5, long session (v0.4).** 120 requests with a forced compaction. The de-dup ledger cuts duplicate injections
   from 128 to 0. With heavy notes, peak unimem context goes from 7.0% to 3.5% of the window. The preamble is
   re-injected after compaction, and the pre-compaction flush saved 5 of 6 planted facts (0 of 6 without it).
+  Re-run on the v0.5 code the picture holds, with different magnitudes (heavy notes: 9.2% → 4.2%; 130–132 duplicates
+  → 0; flush 5/6). E5 is not exactly deterministic, because the background flush races the request loop.
 
 Reproduce: `cargo run --release --bin unimem-bench -- all --data bench/data/heldout2.json --out /tmp/out` and
 `CACHE=/path/to/cache bench/std/run_all.sh`.
@@ -332,7 +341,8 @@ in [examples/config.toml](examples/config.toml), and `unimem config` prints the 
 API keys are never written to the config. Each backend reads its key from the environment variable named in its
 `api_key_env` (`TYPESAFE_API_KEY`, `UNIMEM_LLM_API_KEY`, `UNIMEM_EMBED_API_KEY`, `UNIMEM_DISTILL_API_KEY`).
 
-Environment overrides: `UNIMEM_CONFIG`, `UNIMEM_DATA_DIR`, `UNIMEM_LISTEN`. Logging: `RUST_LOG=unimem=debug`.
+Environment overrides: `UNIMEM_CONFIG`, `UNIMEM_DATA_DIR`, `UNIMEM_LISTEN`, `UNIMEM_ALLOW_ANY_ORIGIN=1` (disable the
+browser-origin check). Logging: `RUST_LOG=unimem=debug`.
 After changing the embedder, run `unimem reembed`.
 
 ## CLI reference
@@ -408,7 +418,9 @@ not yet known. Please read this list before you use it.
   notes on held-out data, against 100% in-sample. v0.4 keeps instruction-like notes out of *passive* injection, but a
   poisoned note can still be stored and returned through `unimem_recall`. Treat shared memory as untrusted input.
 - **There is no authentication** on the gateway, the MCP endpoint or the web UI. Anything that can reach the listen
-  address can read and edit your memory. Keep it on `127.0.0.1` and never bind it to a public interface.
+  address can read and edit your memory. Keep it on `127.0.0.1` and never bind it to a public interface. Requests
+  from web pages are refused (a foreign `Origin` header, or a non-local `Host` name as used by DNS rebinding), so a
+  page in your browser cannot read or poison the store; set `UNIMEM_ALLOW_ANY_ORIGIN=1` only if a trusted tool needs it.
 - **Single point of failure.** All model traffic goes through the gateway. If `unimem serve` is not running, the
   harness cannot reach its model. Memory-layer errors fail open, but a dead process does not, so unset the base URL
   to bypass it.
@@ -418,7 +430,8 @@ not yet known. Please read this list before you use it.
 **Quality**
 
 - **The default decider is a heuristic.** Its thresholds were tuned on the author's synthetic data. Kind
-  classification is about 46% accurate, and the `sufficient` signal misfires on 45% of answerable queries.
+  classification is about 46% accurate. The `sufficient` signal misfired on 45% of answerable heldout2 queries in v0.4;
+  v0.5 brings that to about 9%, but with e5 it misfires on 90% of the in-sample suites, so it is not calibrated per embedder.
 - **Cross-language recall is weak.** A Chinese query against an English note (or the reverse) has R@5 ≈ 0.33,
   against 0.79 within one language. Cross-language duplicates are mostly not detected.
 - Paraphrase (R@5 0.42) and cross-project questions (0.37) are weak. Graph expansion has no measurable effect yet.

@@ -10,7 +10,7 @@ homepage = "https://github.com/mapix/unimem"
 readme = "README.md"
 keywords = ["llm", "memory", "agents", "gateway", "mcp"]
 categories = ["command-line-utilities", "development-tools", "web-programming::http-server"]
-exclude = ["bench/data/*.json", "bench/results/", "bench/std/results/", "docs/paper.pdf", "docs/images/"]
+exclude = ["bench/data/*.json", "bench/results/", "bench/std/results/", "docs/paper/", "docs/images/"]
 
 [[bin]]
 name = "unimem"

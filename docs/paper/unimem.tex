@@ -49,14 +49,14 @@ The result is a set of silos: a correction given to one agent is unknown to the 
 the only integration point all harnesses share, and present \sys{}, a local gateway that sits behind the harness's
 base URL and gives every harness one shared, project-scoped long-term memory without a plugin. \sys{} makes three
 systems contributions: (i) \emph{cache-stable overlay replay}, which records every change it makes to a request
-under a content anchor and re-applies it byte-for-byte, so the provider's prompt-cache prefix never breaks;
+under a content anchor and re-applies it byte-for-byte, so every upstream request stays an exact byte-prefix extension of the previous one;
 (ii) \emph{streaming interception and continuation} of its own tool calls across the Anthropic Messages, OpenAI
 Responses and Chat Completions wire protocols, including mixed turns; and (iii) a \emph{memory-timing policy}
 grounded in a survey of write/read triggers, with token budgets, a cross-turn de-dup ledger, compaction-aware
 re-injection, tool-error recall and a pre-compaction flush. The memory engine follows Jev-Mem's System-One/System-Two
 split with a pluggable typed decider. On a mock upstream, 1060/1060 interception assertions pass, 42/42 upstream
 transitions are exact prefix extensions, and streaming adds 1.15\,ms p50 time-to-first-byte. On an out-of-sample
-coding-memory suite, unified memory reaches cross-harness R@5 0.664 where per-harness silos score 0.000. On the
+coding-memory suite, unified memory reaches cross-harness R@5 0.664 (0.671 with v0.5) where per-harness silos score 0.000. On the
 test split of LongMemEval$_S$ and on LoCoMo, \sys{}'s ranker with a 118M-parameter e5 embedder is level with or
 above BM25+e5 reciprocal-rank fusion (LoCoMo R@10 $+0.035$, 95\% CI $[+0.022,+0.047]$; LongMemEval turn R@10
 $+0.025$, borderline). In a 120-request long-session simulation, the ledger removes all 128 duplicate injections
@@ -151,8 +151,8 @@ and that a remembered proposal must not become an authorization~\cite{groundinga
 limitation we observe.
 
 \para{Memory-first proxies.} BladeX~\cite{bladex} (a self-hosted memory-first proxy for agents) and
-NautGate~\cite{nautgate} (a memory-aware LLM gateway) also place memory at the model API. Both are concurrent work,
-created in 2026; \sys{} was designed independently from first principles. We have not compared against them
+NautGate~\cite{nautgate} (a memory-aware LLM gateway) also place memory at the model API. Both predate this work
+(their repositories were created in May 2026); \sys{} was designed independently from first principles. We have not compared against them
 experimentally, and differences in mechanism (overlay replay, interception, scope decisions) are not established
 by this paper.
 
@@ -548,7 +548,7 @@ body unchanged. The fail-open guarantee covers the memory layer but not the proc
 \section{Implementation}
 \label{sec:impl}
 \sys{} is a single Rust binary (edition 2021; axum/tokio, reqwest, bundled SQLite with FTS5 in WAL mode). The source
-tree has 16,217 lines of Rust: 12,059 in the library and CLI, of which 4,790 are the gateway (three dialects, the
+tree (as of commit \code{a15b022}, the repository-wide \code{cargo fmt} after \code{7c8742a}) has 16,217 lines of Rust: 12,059 in the library and CLI, of which 4,790 are the gateway (three dialects, the
 \code{Turn} timing layer, SSE handling, MCP and the UI API), and 4,158 in the two benchmark drivers; 3,552 further
 lines are integration tests. A grep counts 128 test functions (\code{\#[test]} and \code{\#[tokio::test]}). Embedders are a
 feature-hashing \code{hash2-512} embedder (stems, compound-identifier parts and a 64-entry bilingual concept table) and an
@@ -581,8 +581,8 @@ never used for fitting. \emph{Own suites} (\code{unimem-bench}): \code{devmem} (
 harnesses), \code{heldout} (210 queries, 194 notes, 3 harnesses) and \code{heldout2} (a new developer, 6 new repositories
 and a new harness; 242 queries---218 answerable, 20 unanswerable, 4 forbidden-only---233 notes, 12 distractor pairs and
 6 decoys; 140 answerable queries are cross-harness). \code{devmem} and \code{heldout} became in-sample as we tuned
-against them; \textbf{only \code{heldout2} is out-of-sample} for v0.3 and later. Its file predates the v0.3 commit,
-and no tuning script references it, although 2 of 64 bilingual hint entries added in v0.3 (``queue'', ``retry'') occur
+against them; \textbf{only \code{heldout2} is out-of-sample} for v0.3 and later. Its file timestamp predates the v0.3 commit (it was first
+committed together with the v0.3 evaluation), and no tuning script references it, although 2 of 64 bilingual hint entries added in v0.3 (``queue'', ``retry'') occur
 only in heldout2, so a leak cannot be excluded. All suites were written by an LLM.
 
 %---------------------------------------------------------------------
@@ -684,6 +684,7 @@ system & R@1 & R@5 & MRR & notes/q & precision & scope leak & forbidden hit & st
 \midrule
 \rowcolor{ours} unimem-full (v0.3/v0.4) & 0.555 & 0.688 & 0.616 & 1.6 & 0.423 & 2.5\% & 0.0\% & 16.3\% & 6.6\% & 0.664 \\
 unimem-passive (v0.4) & 0.560 & 0.688 & 0.618 & 1.6 & 0.437 & 2.5\% & 0.0\% & 16.3\% & 1.2\% & 0.671 \\
+unimem-full (v0.5) & 0.555 & 0.693 & 0.617 & 1.65 & 0.424 & 2.5\% & 0.0\% & 16.3\% & 6.2\% & 0.671 \\
 unimem-top5 (v0.5) & 0.555 & 0.784 & 0.648 & 5 & 0.157 & 17.8\% & -- & 34.9\% & 23.6\% & 0.786 \\
 unimem-full, e5 (v0.5) & 0.606 & 0.693 & 0.643 & 1.50 & 0.470 & 1.2\% & 0.0\% & 18.6\% & 5.0\% & 0.664 \\
 unimem-top5, e5 (v0.5) & 0.610 & 0.803 & 0.684 & 5 & 0.161 & 16.9\% & -- & 34.9\% & 29.8\% & 0.786 \\
@@ -698,7 +699,8 @@ bm25-top5-cwd & 0.413 & 0.615 & 0.497 & 4.0 & 0.152 & 3.3\% & 0.0\% & 55.8\% & 3
 \end{tabular}
 \end{table*}
 
-\para{Unified versus silo.} Table~\ref{tab:e1} shows the central architectural claim. On the 140 cross-harness
+\para{Unified versus silo.} Table~\ref{tab:e1} shows the central architectural claim. (Numbers in the text are the v0.3/v0.4 run;
+the released v0.5 code reproduces the v0.5 row exactly, with cross-harness R@5 0.671 and MRR 0.608.) On the 140 cross-harness
 questions (the note was written by a different harness than the one asking), unified memory reaches R@5 0.664 and MRR
 0.605; a per-harness silo scores 0.000 by construction. The cost of unification is small: on 78 same-harness questions
 the silo is slightly better (R@5 0.756 vs 0.731, MRR 0.718 vs 0.637) because a smaller store has fewer competitors.
@@ -743,7 +745,7 @@ write latency p50 / p95 (ms) & 0.54 / 0.83 & 0.70 / 1.02 & 1.26 / 4.96 \\
 \para{Error analysis.} Of the 68 v0.3 misses on answerable heldout2 queries, 32 are cross-language (query and gold note
 in different languages; R@5 0.333 on 48 such queries vs 0.788 on 170 same-language ones, a weakness shared by BM25 and
 hash vectors); about 25 are topical neighbours in the right project outranking the answer; 12 are cross-project; 6 are
-stale notes; 4 golds were destroyed on the write path (2 wrong supersedes, 1 update dropped as a duplicate); and in 8
+stale notes; 4 trace to the write path (2 golds wrongly superseded, 1 update dropped as a duplicate); and in 8
 an unrejected injection note occupies result slots.
 
 %---------------------------------------------------------------------
@@ -841,6 +843,13 @@ heuristic distillation it triggered had stored 5 of the 6 facts stated before co
 against 0 of 6 without the flush. All 3 corrections were hinted. Note that the harness's own context dominates: the maximum
 total context share was 80.7\% in v0.4, of which \sys{} held 1.8\%.
 
+\para{Re-run with the v0.5 code.} E5 was not re-run for v0.5 in the main experiments; re-running it at release (same scenario)
+gives the same qualitative picture but different magnitudes, because v0.5's prior returns different notes: peak live context
+4.5k tokens (2.2\%) for v0.5, 8.4k (4.2\%) with heavy notes versus 18.4k (9.2\%) for heavy/no-budget-no-dedup, 130--132
+duplicate injections removed by the ledger, and 5 of 6 facts saved by the flush (0 of 6 without). E5 is also not exactly
+deterministic: the background flush distillation races the request loop, so cumulative-injection counts vary by up to about 10\%
+between runs. Table~\ref{tab:e5} reports the v0.4 run.
+
 %---------------------------------------------------------------------
 \subsection{RQ5: project identification (E3)}
 \label{sec:rq5}
@@ -936,8 +945,10 @@ against the real backends.
 
 \para{Only the offline heuristic decider was evaluated.} All quality numbers come from the heuristic System One with hash or e5
 embedders. The Jev and LLM deciders are implemented but untested end to end; their 8\,s and 15\,s default timeouts exceed the
-1.5\,s hot-path recall budget, so on the passive path they would often be cut off. Kind classification is 46\% accurate, and the
-\code{sufficient} signal misfires on 45\% of answerable queries (consistent with~\cite{relevancesufficiency}).
+1.5\,s hot-path recall budget, so on the passive path they would often be cut off. Kind classification is 46\% accurate. The
+\code{sufficient} signal misfired on 45\% of answerable heldout2 queries in v0.3/v0.4 (consistent with~\cite{relevancesufficiency});
+v0.5's re-scaled prior brings this to 8.7\% (hash) and 9.6\% (e5) on heldout2 but 89.9\% with e5 on \code{devmem} and \code{heldout},
+so its threshold is not calibrated across embedders and corpora.
 
 \para{No end-to-end metric.} We report retrieval, mechanics and simulated timing, not QA accuracy or task success. A
 LongMemEval/LoCoMo QA script with the official reader and judge prompts is provided (\code{bench/std/qa\_eval.py}) and builds all
@@ -963,7 +974,9 @@ complexity.
 
 \para{Operational and policy risks.} \emph{Single point of failure}: memory errors fail open, but if the process dies the
 harness cannot reach its model until the base URL is unset. \emph{No authentication}: the gateway, MCP endpoint and web UI
-accept anything that reaches the listen address; they must stay on \code{127.0.0.1}. \emph{Terms of service}: rewriting
+accept anything that reaches the listen address; they must stay on \code{127.0.0.1}. Since the release audit, requests that carry a
+foreign \code{Origin} or a non-local \code{Host} name are refused, which closes cross-site POSTs and DNS rebinding from a browser,
+but not other local processes. \emph{Terms of service}: rewriting
 subscription traffic (Claude OAuth, ChatGPT login) and generating extra requests on it may be restricted by provider terms;
 Claude Code's gateway documentation notes that a saved login remains the active credential behind a custom base URL~\cite{ccgateway},
 and the ChatGPT Codex backend is not a public API. \emph{Privacy}: one database holds memories and episodes from every
@@ -1077,7 +1090,8 @@ timeline, recall playground and activity log. The UI has no authentication.}
 
 \begin{table}[H]
 \centering\small
-\caption{heldout2 R@5 by category (out-of-sample; hash embedder; vector columns use \code{hash2}).}
+\caption{heldout2 R@5 by category (out-of-sample; hash embedder; vector columns use \code{hash2}). $n$ counts all queries of the
+category; scope\_isolation R@5 is over its 18 answerable queries (4 are forbidden-only).}
 \label{tab:cat}
 \begin{tabular}{@{}lrccccccc@{}}
 \toprule

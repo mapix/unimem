@@ -130,7 +130,14 @@ async fn dispatch(st: &Shared, headers: &HeaderMap, session: &mut Option<String>
             let sid = session.clone().unwrap_or_else(|| format!("mcp-{}", crate::util::new_id()));
             let client = params["clientInfo"]["name"].as_str().unwrap_or("");
             let harness = if client.is_empty() { detect_harness(headers) } else { harness_from_client(client) };
-            sessions().lock().insert(sid.clone(), harness);
+            {
+                // bounded: clients that never send DELETE would otherwise grow this map forever
+                let mut s = sessions().lock();
+                if s.len() >= 4096 && !s.contains_key(&sid) {
+                    s.clear();
+                }
+                s.insert(sid.clone(), harness);
+            }
             *session = Some(sid);
             let proto = params["protocolVersion"].as_str().unwrap_or(DEFAULT_PROTOCOL);
             rpc_ok(
