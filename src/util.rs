@@ -3,10 +3,7 @@
 use sha2::{Digest, Sha256};
 
 pub fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 pub fn fmt_date(ts: i64) -> String {
@@ -111,8 +108,10 @@ pub fn expand_tilde(p: &str) -> std::path::PathBuf {
 pub fn strip_harness_noise(s: &str) -> String {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r"(?s)<system-reminder>.*?</system-reminder>|<unimem[^>]*>.*?</unimem[^>]*>|<environment_context>.*?</environment_context>")
-            .unwrap()
+        regex::Regex::new(
+            r"(?s)<system-reminder>.*?</system-reminder>|<unimem[^>]*>.*?</unimem[^>]*>|<environment_context>.*?</environment_context>",
+        )
+        .unwrap()
     });
     re.replace_all(s, "").trim().to_string()
 }

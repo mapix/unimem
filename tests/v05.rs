@@ -69,14 +69,28 @@ async fn tool_with_explicit_k_ranks_with_scores() {
     assert_eq!(count(&ranked), 6, "{ranked}");
     assert!(count(&plain) <= count(&ranked));
     // every ranked line starts with its score
-    assert!(ranked.lines().filter(|l| l.contains("(m_")).all(|l| l.split_whitespace().next().is_some_and(|t| t.parse::<f64>().is_ok())), "{ranked}");
+    assert!(
+        ranked.lines().filter(|l| l.contains("(m_")).all(|l| l.split_whitespace().next().is_some_and(|t| t.parse::<f64>().is_ok())),
+        "{ranked}"
+    );
 }
 
 #[tokio::test]
 async fn passive_injection_keeps_the_adaptive_cutoff() {
     let e = engine();
     let ctx = seed(&e).await;
-    let out = e.recall(&ctx, RecallReq { query: "how does the kestrel ingest worker retry failed uploads?".into(), k: 8, passive: true, ..Default::default() }).await.unwrap();
+    let out = e
+        .recall(
+            &ctx,
+            RecallReq {
+                query: "how does the kestrel ingest worker retry failed uploads?".into(),
+                k: 8,
+                passive: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     assert!(out.notes.len() <= 3, "{:?}", out.notes.len());
 }
 
@@ -138,7 +152,12 @@ fn prior_weights_follow_the_embedder_family() {
     let base = Evidence { coverage: 0.5, lex_rel: 0.5, cov_rel: 0.5, cos_z: 1.0, cos_zrel: 0.5, rrf: 0.5, ..Default::default() };
     for w in [PRIOR_HASH, PRIOR_DENSE] {
         let p0 = relevance_prior(&base, &w);
-        for f in [|e: &mut Evidence| e.coverage += 0.1, |e: &mut Evidence| e.lex_rel += 0.1, |e: &mut Evidence| e.cos_z += 0.5, |e: &mut Evidence| e.rrf += 0.1] {
+        for f in [
+            |e: &mut Evidence| e.coverage += 0.1,
+            |e: &mut Evidence| e.lex_rel += 0.1,
+            |e: &mut Evidence| e.cos_z += 0.5,
+            |e: &mut Evidence| e.rrf += 0.1,
+        ] {
             let mut e = base.clone();
             f(&mut e);
             assert!(relevance_prior(&e, &w) > p0);

@@ -67,7 +67,17 @@ async fn mcp_roundtrip() {
     assert_eq!(tools.len(), 4);
     assert!(tools.iter().all(|t| t["inputSchema"]["properties"]["cwd"].is_object()));
 
-    let (_, _, v) = post(&c, &url, Some(&sid), call(3, "unimem_remember", json!({"content": "The staging database is reset every Sunday at 03:00 UTC by the cron job db-reset", "scope": "global"}))).await;
+    let (_, _, v) = post(
+        &c,
+        &url,
+        Some(&sid),
+        call(
+            3,
+            "unimem_remember",
+            json!({"content": "The staging database is reset every Sunday at 03:00 UTC by the cron job db-reset", "scope": "global"}),
+        ),
+    )
+    .await;
     let v = v.unwrap();
     assert_eq!(v["result"]["isError"], false);
     let text = v["result"]["content"][0]["text"].as_str().unwrap();

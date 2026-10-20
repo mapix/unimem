@@ -270,7 +270,12 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
         session::migrate(&conn);
-        let s = Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()), sstate: Mutex::new(HashMap::new()) };
+        let s = Store {
+            conn: Mutex::new(conn),
+            vecs: RwLock::new(HashMap::new()),
+            lex: RwLock::new(LexIndex::default()),
+            sstate: Mutex::new(HashMap::new()),
+        };
         s.load_vectors()?;
         s.load_lexical()?;
         Ok(s)
@@ -280,12 +285,18 @@ impl Store {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
         session::migrate(&conn);
-        Ok(Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()), sstate: Mutex::new(HashMap::new()) })
+        Ok(Store {
+            conn: Mutex::new(conn),
+            vecs: RwLock::new(HashMap::new()),
+            lex: RwLock::new(LexIndex::default()),
+            sstate: Mutex::new(HashMap::new()),
+        })
     }
 
     fn load_vectors(&self) -> Result<()> {
         let c = self.conn.lock();
-        let mut st = c.prepare("SELECT id, scope, superseded_by IS NULL, embedding FROM memories WHERE deleted=0 AND embedding IS NOT NULL")?;
+        let mut st =
+            c.prepare("SELECT id, scope, superseded_by IS NULL, embedding FROM memories WHERE deleted=0 AND embedding IS NOT NULL")?;
         let rows = st.query_map([], |r| {
             let b: Vec<u8> = r.get(3)?;
             Ok((r.get::<_, String>(0)?, VecEntry { scope: r.get(1)?, live: r.get(2)?, v: blob_to_vec(&b) }))
@@ -562,7 +573,11 @@ impl Store {
         }
         let mut v: Vec<LexHit> = acc
             .into_iter()
-            .map(|(id, (s, c))| LexHit { id: id.to_string(), score: s, coverage: if total > 0.0 { (c.values().sum::<f64>() / total).min(1.0) } else { 0.0 } })
+            .map(|(id, (s, c))| LexHit {
+                id: id.to_string(),
+                score: s,
+                coverage: if total > 0.0 { (c.values().sum::<f64>() / total).min(1.0) } else { 0.0 },
+            })
             .collect();
         v.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
         v.truncate(k);
@@ -594,7 +609,8 @@ impl Store {
     /// (top-k, mean, standard deviation, number of notes). Used to put cosines of different embedders on one scale.
     pub fn vec_search_stats(&self, q: &[f32], scopes: &[String], k: usize) -> (Vec<(String, f32)>, f64, f64, usize) {
         let m = self.vecs.read();
-        let mut all: Vec<(&String, f32)> = m.iter().filter(|(_, e)| e.live && scopes.iter().any(|s| s == &e.scope)).map(|(id, e)| (id, cosine(q, &e.v))).collect();
+        let mut all: Vec<(&String, f32)> =
+            m.iter().filter(|(_, e)| e.live && scopes.iter().any(|s| s == &e.scope)).map(|(id, e)| (id, cosine(q, &e.v))).collect();
         let n = all.len();
         let (mut s, mut s2) = (0f64, 0f64);
         for (_, c) in &all {
@@ -603,7 +619,8 @@ impl Store {
         }
         let mean = if n > 0 { s / n as f64 } else { 0.0 };
         let var = if n > 1 { ((s2 - n as f64 * mean * mean) / (n as f64 - 1.0)).max(0.0) } else { 0.0 };
-        let cmp = |a: &(&String, f32), b: &(&String, f32)| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(b.0));
+        let cmp =
+            |a: &(&String, f32), b: &(&String, f32)| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(b.0));
         if k < n {
             all.select_nth_unstable_by(k, cmp);
             all.truncate(k);
@@ -657,11 +674,9 @@ impl Store {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        st.query_map([id], |r| {
-            Ok(Edge { src: r.get(0)?, dst: r.get(1)?, rel: r.get(2)?, weight: r.get(3)?, judged_by: r.get(4)? })
-        })
-        .map(|it| it.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+        st.query_map([id], |r| Ok(Edge { src: r.get(0)?, dst: r.get(1)?, rel: r.get(2)?, weight: r.get(3)?, judged_by: r.get(4)? }))
+            .map(|it| it.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
     }
 
     pub fn latest_in_session(&self, session: &str, scope: &str, exclude: &str) -> Option<String> {
@@ -763,9 +778,8 @@ impl Store {
 
     pub fn undistilled_episodes(&self, session: &str) -> Vec<Episode> {
         let c = self.conn.lock();
-        let mut st = c
-            .prepare("SELECT id,session,harness,pid,role,text,ts FROM episodes WHERE session=? AND distilled=0 ORDER BY id")
-            .unwrap();
+        let mut st =
+            c.prepare("SELECT id,session,harness,pid,role,text,ts FROM episodes WHERE session=? AND distilled=0 ORDER BY id").unwrap();
         st.query_map([session], |r| {
             Ok(Episode {
                 id: r.get(0)?,
@@ -839,17 +853,24 @@ impl Store {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        st.query_map([], |r| Ok(Episode { id: r.get(0)?, session: r.get(1)?, harness: r.get(2)?, pid: r.get(3)?, role: r.get(4)?, text: r.get(5)?, ts: r.get(6)? }))
-            .map(|it| it.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default()
+        st.query_map([], |r| {
+            Ok(Episode {
+                id: r.get(0)?,
+                session: r.get(1)?,
+                harness: r.get(2)?,
+                pid: r.get(3)?,
+                role: r.get(4)?,
+                text: r.get(5)?,
+                ts: r.get(6)?,
+            })
+        })
+        .map(|it| it.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
     }
 
     // ---------- traces ----------
     pub fn trace(&self, kind: &str, data: &serde_json::Value) {
-        let _ = self.conn.lock().execute(
-            "INSERT INTO traces(ts,kind,data) VALUES (?,?,?)",
-            params![now_ts(), kind, data.to_string()],
-        );
+        let _ = self.conn.lock().execute("INSERT INTO traces(ts,kind,data) VALUES (?,?,?)", params![now_ts(), kind, data.to_string()]);
     }
 
     pub fn recent_traces(&self, n: usize) -> Vec<(i64, String, String)> {

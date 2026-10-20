@@ -250,7 +250,9 @@ pub mod onnx {
                 Some(p) => {
                     let _ = ort::init_from(p).commit();
                 }
-                None => return Err(anyhow!("ONNX Runtime library not configured: set embedder.ort_dylib or ORT_DYLIB_PATH to libonnxruntime")),
+                None => {
+                    return Err(anyhow!("ONNX Runtime library not configured: set embedder.ort_dylib or ORT_DYLIB_PATH to libonnxruntime"))
+                }
             }
             let session = ort::session::Session::builder()
                 .and_then(|b| b.with_intra_threads(threads.max(1)))

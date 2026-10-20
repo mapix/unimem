@@ -248,7 +248,11 @@ impl Decider for LlmDecider {
         for (k, q) in questions {
             let x = &a[k];
             let ans = match &q.kind {
-                Kind::Noul => Answer { p: x["p"].as_f64().ok_or_else(|| anyhow!("llm: missing {k}"))?.clamp(0.0, 1.0), by: "llm", ..Default::default() },
+                Kind::Noul => Answer {
+                    p: x["p"].as_f64().ok_or_else(|| anyhow!("llm: missing {k}"))?.clamp(0.0, 1.0),
+                    by: "llm",
+                    ..Default::default()
+                },
                 Kind::Choice(opts) => {
                     let c = x["choice"].as_str().unwrap_or("");
                     let c = opts.iter().find(|o| o.0 == c).map(|o| o.0.clone()).ok_or_else(|| anyhow!("llm: bad choice {k}"))?;
@@ -342,10 +346,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn chain_falls_back_to_heuristic() {
-        let chain = ChainDecider::new(vec![
-            Box::new(JevDecider::new("http://127.0.0.1:1", None, None, 300)),
-            Box::new(HeuristicDecider),
-        ]);
+        let chain = ChainDecider::new(vec![Box::new(JevDecider::new("http://127.0.0.1:1", None, None, 300)), Box::new(HeuristicDecider)]);
         let qs: Questions = vec![("x".into(), Question::noul("is it?", 0.8))];
         let a = chain.ask(&json!("s"), &qs).await.unwrap();
         assert_eq!(a["x"].by, "heuristic");

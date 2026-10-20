@@ -138,7 +138,8 @@ pub fn stem(w: &str) -> String {
     };
     if let Some(x) = s.strip_suffix("ing").filter(|x| x.len() >= 3 && x.bytes().any(|b| b"aeiouy".contains(&b))) {
         s = undouble(x);
-    } else if let Some(x) = s.strip_suffix("ed").filter(|x| x.len() >= 3 && !x.ends_with('e') && x.bytes().any(|b| b"aeiouy".contains(&b))) {
+    } else if let Some(x) = s.strip_suffix("ed").filter(|x| x.len() >= 3 && !x.ends_with('e') && x.bytes().any(|b| b"aeiouy".contains(&b)))
+    {
         s = undouble(x);
     }
     if s.len() >= 4 && s.ends_with('e') {
@@ -155,7 +156,9 @@ pub fn identifier_parts(raw: &str) -> Vec<String> {
         let cs: Vec<char> = chunk.chars().collect();
         let mut cur = String::new();
         for (i, c) in cs.iter().enumerate() {
-            let boundary = i > 0 && c.is_uppercase() && (cs[i - 1].is_lowercase() || cs.get(i + 1).is_some_and(|n| n.is_lowercase()) && cs[i - 1].is_uppercase());
+            let boundary = i > 0
+                && c.is_uppercase()
+                && (cs[i - 1].is_lowercase() || cs.get(i + 1).is_some_and(|n| n.is_lowercase()) && cs[i - 1].is_uppercase());
             if boundary && !cur.is_empty() {
                 parts.push(cur.to_lowercase());
                 cur.clear();
@@ -289,7 +292,14 @@ mod tests {
     use super::*;
     #[test]
     fn stems() {
-        for (a, b) in [("deploying", "deployed"), ("deploys", "deploy"), ("releases", "release"), ("running", "run"), ("rebasing", "rebase"), ("dependencies", "dependency")] {
+        for (a, b) in [
+            ("deploying", "deployed"),
+            ("deploys", "deploy"),
+            ("releases", "release"),
+            ("running", "run"),
+            ("rebasing", "rebase"),
+            ("dependencies", "dependency"),
+        ] {
             assert_eq!(stem(a), stem(b), "{a} {b}");
         }
         assert_eq!(stem("need"), "need");

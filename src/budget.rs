@@ -99,7 +99,15 @@ pub struct Budget {
 impl Budget {
     pub fn new(cfg: &Inject, window: u64) -> Self {
         if !cfg.budgets {
-            return Self { window, turn: usize::MAX, preamble: usize::MAX, tool: usize::MAX, tool_recall: usize::MAX, session: usize::MAX, enabled: false };
+            return Self {
+                window,
+                turn: usize::MAX,
+                preamble: usize::MAX,
+                tool: usize::MAX,
+                tool_recall: usize::MAX,
+                session: usize::MAX,
+                enabled: false,
+            };
         }
         let share = |f: f64| (window as f64 * f) as usize;
         Self {

@@ -90,7 +90,8 @@ pub fn transcript(eps: &[Episode], max: usize) -> String {
 fn remember_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(r"(?i)(\bremember\b|\bkeep in mind\b|\bfrom now on\b|\bgoing forward\b|\bnote that\b|记住|记一下|记下|以后都|今后)").unwrap()
+        Regex::new(r"(?i)(\bremember\b|\bkeep in mind\b|\bfrom now on\b|\bgoing forward\b|\bnote that\b|记住|记一下|记下|以后都|今后)")
+            .unwrap()
     })
 }
 
@@ -281,7 +282,13 @@ async fn apply(engine: &Engine, client: Option<&reqwest::Client>, ctx: &Ctx, can
                         n += 1;
                         if let Some(old) = target.filter(|o| !superseded.contains(o)) {
                             let _ = engine.store.supersede(&old, &id);
-                            let _ = engine.store.add_edge(&crate::store::Edge { src: id.clone(), dst: old, rel: "supersedes".into(), weight: 0.9, judged_by: "distill".into() });
+                            let _ = engine.store.add_edge(&crate::store::Edge {
+                                src: id.clone(),
+                                dst: old,
+                                rel: "supersedes".into(),
+                                weight: 0.9,
+                                judged_by: "distill".into(),
+                            });
                         }
                     }
                     Ok(_) => {}
@@ -315,7 +322,8 @@ pub async fn distill_session(engine: &Engine, session: &str) -> Result<usize> {
         return Ok(0);
     }
     let row = engine.store.session_row(session);
-    let ctx = engine.ctx_for(row.as_ref().map(|r| r.harness.as_str()).unwrap_or("distill"), session, row.as_ref().and_then(|r| r.cwd.as_deref()));
+    let ctx =
+        engine.ctx_for(row.as_ref().map(|r| r.harness.as_str()).unwrap_or("distill"), session, row.as_ref().and_then(|r| r.cwd.as_deref()));
     let cl = if use_model { Some(client()?) } else { None };
     let important = engine.store.important_episodes(session, 3);
     let (mut stored, mut done) = (0usize, 0usize);
@@ -356,7 +364,10 @@ pub fn rate_share(h: &reqwest::header::HeaderMap) -> Option<f64> {
     let num = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<f64>().ok());
     let mut share: Option<f64> = None;
     for kind in ["requests", "tokens", "input-tokens", "output-tokens"] {
-        for (rem, lim) in [(format!("anthropic-ratelimit-{kind}-remaining"), format!("anthropic-ratelimit-{kind}-limit")), (format!("x-ratelimit-remaining-{kind}"), format!("x-ratelimit-limit-{kind}"))] {
+        for (rem, lim) in [
+            (format!("anthropic-ratelimit-{kind}-remaining"), format!("anthropic-ratelimit-{kind}-limit")),
+            (format!("x-ratelimit-remaining-{kind}"), format!("x-ratelimit-limit-{kind}")),
+        ] {
             if let (Some(r), Some(l)) = (num(&rem), num(&lim)) {
                 if l > 0.0 {
                     let x = (r / l).clamp(0.0, 1.0);
@@ -390,7 +401,9 @@ pub fn spawn_session(engine: Arc<Engine>, session: String, reason: &'static str)
         return;
     }
     if !rate_ok(&engine) {
-        engine.store.trace("distill_skipped", &json!({"session": session, "reason": "rate_limit", "remaining": rate_limit_remaining(&engine)}));
+        engine
+            .store
+            .trace("distill_skipped", &json!({"session": session, "reason": "rate_limit", "remaining": rate_limit_remaining(&engine)}));
         return;
     }
     if !IN_FLIGHT.lock().get_or_insert_with(HashSet::new).insert(session.clone()) {

@@ -59,7 +59,10 @@ fn labels(e: &Engine) -> HashMap<String, String> {
 fn mem_json(m: &Memory, labels: &HashMap<String, String>) -> Value {
     let mut v = serde_json::to_value(m).unwrap_or_default();
     if let Some(o) = v.as_object_mut() {
-        o.insert("scope_label".into(), json!(labels.get(&m.scope).cloned().unwrap_or_else(|| m.scope.trim_start_matches("project:").to_string())));
+        o.insert(
+            "scope_label".into(),
+            json!(labels.get(&m.scope).cloned().unwrap_or_else(|| m.scope.trim_start_matches("project:").to_string())),
+        );
         o.insert("date".into(), json!(fmt_date(m.created_at)));
     }
     v
@@ -79,7 +82,10 @@ fn find_project(e: &Engine, s: &str) -> Option<Project> {
     if n.is_empty() {
         return None;
     }
-    e.store.list_projects().into_iter().find(|p| p.pid.to_lowercase() == n || p.name.to_lowercase() == n || p.aliases.iter().any(|a| a.to_lowercase() == n))
+    e.store
+        .list_projects()
+        .into_iter()
+        .find(|p| p.pid.to_lowercase() == n || p.name.to_lowercase() == n || p.aliases.iter().any(|a| a.to_lowercase() == n))
 }
 
 fn all_memories(e: &Engine, include_superseded: bool) -> Vec<Memory> {
@@ -87,7 +93,12 @@ fn all_memories(e: &Engine, include_superseded: bool) -> Vec<Memory> {
 }
 
 fn ctx_for_project(p: Project) -> Ctx {
-    Ctx { harness: "ui".into(), session: "ui".into(), cwd: Some(p.root.clone()), project: Some(Resolved { project: p, git: None, is_new: false }) }
+    Ctx {
+        harness: "ui".into(),
+        session: "ui".into(),
+        cwd: Some(p.root.clone()),
+        project: Some(Resolved { project: p, git: None, is_new: false }),
+    }
 }
 
 fn bump(m: &mut Map<String, Value>, k: &str) {
@@ -178,7 +189,8 @@ async fn list_memories(State(st): State<Shared>, Query(q): Query<MemQuery>) -> R
             None => return err(StatusCode::BAD_REQUEST, format!("unknown scope '{s}'")),
         },
     };
-    let kinds: Vec<String> = q.kind.as_deref().unwrap_or("").split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty() && k != "all").collect();
+    let kinds: Vec<String> =
+        q.kind.as_deref().unwrap_or("").split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty() && k != "all").collect();
     let harness = q.harness.as_deref().map(str::trim).filter(|h| !h.is_empty() && *h != "all");
     let incl = q.include_superseded.unwrap_or(false);
     let limit = q.limit.unwrap_or(200).clamp(1, 2000);
@@ -200,7 +212,9 @@ async fn list_memories(State(st): State<Shared>, Query(q): Query<MemQuery>) -> R
         };
         let project = if ctx.project.is_some() { None } else { Some("all".to_string()) };
         let mut seen: HashSet<String> = HashSet::new();
-        if let Ok(out) = e.recall(&ctx, RecallReq { query: query.to_string(), project, k: 50, passive: false, depth: crate::engine::Depth::TopK }).await {
+        if let Ok(out) =
+            e.recall(&ctx, RecallReq { query: query.to_string(), project, k: 50, passive: false, depth: crate::engine::Depth::TopK }).await
+        {
             for h in out.notes {
                 if let Some(m) = e.store.get_memory(&h.id).filter(|m| keep(m)) {
                     let mut v = mem_json(&m, &lab);
@@ -286,7 +300,8 @@ async fn memory_detail(State(st): State<Shared>, Path(id): Path<String>) -> Resp
         .collect();
     let chain: Vec<Value> = supersede_chain(e, &m).iter().map(|c| mem_json(c, &lab)).collect();
     let project = m.scope.strip_prefix("project:").and_then(|pid| e.store.get_project(pid));
-    Json(json!({"memory": mem_json(&m, &lab), "neighbors": neighbors, "chain": chain, "source": m.source, "project": project})).into_response()
+    Json(json!({"memory": mem_json(&m, &lab), "neighbors": neighbors, "chain": chain, "source": m.source, "project": project}))
+        .into_response()
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -374,7 +389,8 @@ async fn list_projects(State(st): State<Shared>) -> Response {
         let (kinds, live, sup, pinned) = by.get(scope).cloned().unwrap_or_default();
         json!({"scope": scope, "card": p, "counts": {"live": live, "superseded": sup, "pinned": pinned, "by_kind": kinds}})
     };
-    let projects: Vec<Value> = e.store.list_projects().into_iter().map(|p| card(&scope_of(&p.pid), serde_json::to_value(&p).unwrap_or_default())).collect();
+    let projects: Vec<Value> =
+        e.store.list_projects().into_iter().map(|p| card(&scope_of(&p.pid), serde_json::to_value(&p).unwrap_or_default())).collect();
     Json(json!({"projects": projects, "global": card("global", Value::Null)})).into_response()
 }
 
@@ -388,7 +404,9 @@ pub struct ProjPatch {
 
 async fn patch_project(State(st): State<Shared>, Path(pid): Path<String>, Json(p): Json<ProjPatch>) -> Response {
     let e = &st.engine;
-    let Some(proj) = e.store.get_project(&pid).or_else(|| find_project(e, &pid)) else { return err(StatusCode::NOT_FOUND, format!("no project {pid}")) };
+    let Some(proj) = e.store.get_project(&pid).or_else(|| find_project(e, &pid)) else {
+        return err(StatusCode::NOT_FOUND, format!("no project {pid}"));
+    };
     let ctx = ctx_for_project(proj);
     let updated = match e.update_project(&ctx, p.name.as_deref(), p.summary.as_deref(), p.aliases.clone()) {
         Ok(Some(x)) => x,
@@ -477,7 +495,8 @@ async fn timeline(State(st): State<Shared>, Query(q): Query<ScopeQuery>) -> Resp
             }));
         }
     }
-    let out: Vec<Value> = days.into_iter().rev().map(|(day, (memories, events))| json!({"day": day, "memories": memories, "events": events})).collect();
+    let out: Vec<Value> =
+        days.into_iter().rev().map(|(day, (memories, events))| json!({"day": day, "memories": memories, "events": events})).collect();
     Json(json!({"days": out})).into_response()
 }
 
@@ -519,10 +538,11 @@ async fn recall(State(st): State<Shared>, Json(b): Json<RecallBody>) -> Response
     let extra = if b.project.as_deref() == Some("all") { Some("all".to_string()) } else { None };
     let passive = b.passive.unwrap_or(true);
     let k = b.k.unwrap_or(e.cfg.inject.max_recall_notes);
-    let out = match e.recall(&ctx, RecallReq { query: truncate_chars(&b.query, 2000), project: extra, k, passive, ..Default::default() }).await {
-        Ok(o) => o,
-        Err(x) => return err(StatusCode::INTERNAL_SERVER_ERROR, x.to_string()),
-    };
+    let out =
+        match e.recall(&ctx, RecallReq { query: truncate_chars(&b.query, 2000), project: extra, k, passive, ..Default::default() }).await {
+            Ok(o) => o,
+            Err(x) => return err(StatusCode::INTERNAL_SERVER_ERROR, x.to_string()),
+        };
     // Same text the gateway appends to the user prompt (see `gateway::build_augmentation`).
     let rendered = if out.notes.is_empty() {
         String::new()
@@ -660,7 +680,10 @@ fn write_demo_repo(dir: &std::path::Path, p: &DemoProject, i: usize) -> anyhow::
     let root = dir.join(p.name);
     std::fs::create_dir_all(root.join(".git/refs/heads"))?;
     std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n")?;
-    std::fs::write(root.join(".git/config"), format!("[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = {}\n", p.remote))?;
+    std::fs::write(
+        root.join(".git/config"),
+        format!("[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = {}\n", p.remote),
+    )?;
     let commit = crate::util::hash_hex(&["demo", p.name, &i.to_string()]);
     std::fs::write(root.join(".git/refs/heads/main"), format!("{}{}\n", commit, &commit[..8]))?;
     std::fs::write(root.join(p.manifest.0), p.manifest.1)?;
@@ -706,14 +729,26 @@ pub async fn demo_seed(e: &Engine, dir: &std::path::Path) -> anyhow::Result<usiz
             source: Source {
                 harness: harness.to_string(),
                 session: format!("{harness}-{}-{days}", sk.to_lowercase()),
-                cwd: ctx.and_then(|c| c.cwd.clone()).unwrap_or_else(|| dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default()),
-                branch: if *days < 10 && *sk != "G" { format!("feat/{}", key.to_lowercase()) } else { git.as_ref().map(|g| g.branch.clone()).unwrap_or_default() },
+                cwd: ctx
+                    .and_then(|c| c.cwd.clone())
+                    .unwrap_or_else(|| dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default()),
+                branch: if *days < 10 && *sk != "G" {
+                    format!("feat/{}", key.to_lowercase())
+                } else {
+                    git.as_ref().map(|g| g.branch.clone()).unwrap_or_default()
+                },
                 commit: git.as_ref().map(|g| g.commit.clone()).unwrap_or_default(),
             },
             created_at: ts,
             updated_at: ts,
             superseded_by: None,
-            salience: if *pinned { 1.0 } else if matches!(*kind, "preference" | "gotcha" | "procedure") { 0.7 } else { 0.5 },
+            salience: if *pinned {
+                1.0
+            } else if matches!(*kind, "preference" | "gotcha" | "procedure") {
+                0.7
+            } else {
+                0.5
+            },
             hits: ((i * 7) % 13) as i64,
             last_hit_at: Some(now - ((i as i64 * 3571) % 400000)),
             pinned: *pinned,
@@ -724,7 +759,9 @@ pub async fn demo_seed(e: &Engine, dir: &std::path::Path) -> anyhow::Result<usiz
         embs.insert(id.clone(), emb);
         ids.insert(key, id);
     }
-    let edge = |src: &str, dst: &str, rel: &str, w: f64, by: &str| e.store.add_edge(&Edge { src: src.into(), dst: dst.into(), rel: rel.into(), weight: w, judged_by: by.into() });
+    let edge = |src: &str, dst: &str, rel: &str, w: f64, by: &str| {
+        e.store.add_edge(&Edge { src: src.into(), dst: dst.into(), rel: rel.into(), weight: w, judged_by: by.into() })
+    };
     for (newer, older) in DEMO_SUPERSEDES {
         let (n, o) = (&ids[newer], &ids[older]);
         e.store.supersede(o, n)?;
@@ -743,7 +780,8 @@ pub async fn demo_seed(e: &Engine, dir: &std::path::Path) -> anyhow::Result<usiz
         }
         // semantic: each note's two nearest neighbours within its scope
         for (_, id) in list.iter() {
-            let mut sims: Vec<(f32, &String)> = list.iter().filter(|x| &x.1 != id).map(|(_, o)| (crate::store::cosine(&embs[id], &embs[o]), o)).collect();
+            let mut sims: Vec<(f32, &String)> =
+                list.iter().filter(|x| &x.1 != id).map(|(_, o)| (crate::store::cosine(&embs[id], &embs[o]), o)).collect();
             sims.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
             for (s, o) in sims.into_iter().take(2).filter(|x| x.0 > 0.3) {
                 if id < o {
@@ -756,11 +794,24 @@ pub async fn demo_seed(e: &Engine, dir: &std::path::Path) -> anyhow::Result<usiz
     for (k, ctx) in &ctxs {
         let sess = format!("demo-{}", k.to_lowercase());
         let _ = e.store.touch_session(&sess, "claude-code", ctx.pid(), ctx.cwd.as_deref());
-        for (role, text) in [("user", "why did we move idempotency keys out of redis?"), ("assistant", "Because Redis evicted keys under memory pressure, which caused double charges; they now live in Postgres.")] {
-            e.store.add_episode(&sess, "claude-code", ctx.pid(), role, &format!("[{}] {text}", ctx.project.as_ref().map(|r| r.project.name.as_str()).unwrap_or("")))?;
+        for (role, text) in [
+            ("user", "why did we move idempotency keys out of redis?"),
+            ("assistant", "Because Redis evicted keys under memory pressure, which caused double charges; they now live in Postgres."),
+        ] {
+            e.store.add_episode(
+                &sess,
+                "claude-code",
+                ctx.pid(),
+                role,
+                &format!("[{}] {text}", ctx.project.as_ref().map(|r| r.project.name.as_str()).unwrap_or("")),
+            )?;
         }
     }
-    for (k, q) in [("P", "where are idempotency keys stored and for how long?"), ("A", "how do I format money amounts in the dashboard?"), ("T", "how do I backfill a partition?")] {
+    for (k, q) in [
+        ("P", "where are idempotency keys stored and for how long?"),
+        ("A", "how do I format money amounts in the dashboard?"),
+        ("T", "how do I backfill a partition?"),
+    ] {
         let _ = e.recall(&ctxs[k], RecallReq { query: q.into(), project: None, k: 5, passive: false, ..Default::default() }).await;
     }
     e.store.meta_set("demo_seeded", &now.to_string())?;

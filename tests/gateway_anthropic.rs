@@ -55,7 +55,9 @@ async fn mock_handler(State(m): State<Arc<Mock>>, req: Request) -> Response {
     let reply = m.script.lock().pop_front().unwrap_or(Reply::Json(json!({"input_tokens": 1})));
     match reply {
         Reply::Json(v) => Response::builder().header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
-        Reply::Status(s, v) => Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+        Reply::Status(s, v) => {
+            Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap()
+        }
         Reply::Sse(evs) => {
             let mut s = String::new();
             for e in evs {
@@ -83,10 +85,21 @@ async fn serve(r: Router) -> String {
 async fn env(script: Vec<Reply>) -> Env {
     let mock = Arc::new(Mock::default());
     *mock.script.lock() = script.into();
-    let up = serve(Router::new().route("/v1/messages", post(mock_handler)).route("/v1/messages/count_tokens", post(mock_handler)).with_state(mock.clone())).await;
+    let up = serve(
+        Router::new()
+            .route("/v1/messages", post(mock_handler))
+            .route("/v1/messages/count_tokens", post(mock_handler))
+            .with_state(mock.clone()),
+    )
+    .await;
     let mut cfg = Config::default();
     cfg.upstream.anthropic = up;
-    let engine = Arc::new(Engine::with_parts(cfg, Store::open_memory().unwrap(), Box::new(HashEmbedder { dim: 512 }), ChainDecider::new(vec![Box::new(HeuristicDecider)])));
+    let engine = Arc::new(Engine::with_parts(
+        cfg,
+        Store::open_memory().unwrap(),
+        Box::new(HashEmbedder { dim: 512 }),
+        ChainDecider::new(vec![Box::new(HeuristicDecider)]),
+    ));
     let state = Arc::new(AppState { engine: engine.clone(), client: reqwest::Client::new() });
     let gw = serve(gateway::router(state)).await;
     Env { mock, gw, engine, client: reqwest::Client::new() }
@@ -143,7 +156,10 @@ fn tool_block(i: u64, id: &str, name: &str, input: &Value) -> Vec<Value> {
     ]
 }
 fn end(stop: &str, out: u64) -> Vec<Value> {
-    vec![json!({"type":"message_delta","delta":{"stop_reason":stop,"stop_sequence":null},"usage":{"output_tokens":out}}), json!({"type":"message_stop"})]
+    vec![
+        json!({"type":"message_delta","delta":{"stop_reason":stop,"stop_sequence":null},"usage":{"output_tokens":out}}),
+        json!({"type":"message_stop"}),
+    ]
 }
 fn sse_script(id: &str, parts: Vec<Vec<Value>>) -> Reply {
     let mut v = vec![start(id), json!({"type":"ping"})];
@@ -352,7 +368,9 @@ async fn non_stream_merges_rounds_and_sums_usage() {
     assert!(b2["messages"][2]["content"][0]["content"].as_str().unwrap().contains("sufficient: false"));
 
     // follow-up expands
-    let r = e.post("/v1/messages", &agent_req(json!([u1, {"role":"assistant","content": v["content"]}, {"role":"user","content":"ok"}]), false)).await;
+    let r = e
+        .post("/v1/messages", &agent_req(json!([u1, {"role":"assistant","content": v["content"]}, {"role":"user","content":"ok"}]), false))
+        .await;
     assert!(r.status().is_success());
     let b3 = e.seen()[2].body();
     let m = b3["messages"].as_array().unwrap();
@@ -403,7 +421,15 @@ async fn mixed_turn_hands_harness_tools_and_replays_hidden_results() {
 async fn non_agent_requests_pass_through_byte_identical() {
     let e = env(vec![Reply::Json(json!({"id":"t","type":"message","content":[{"type":"text","text":"Title"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}))]).await;
     let raw = r#"{"model":"claude-haiku","max_tokens":32,  "messages":[{"role":"user","content":"title for: fix bug"}]}"#;
-    let r = e.client.post(format!("{}/v1/messages", e.gw)).header("x-api-key", "k").header("content-type", "application/json").body(raw).send().await.unwrap();
+    let r = e
+        .client
+        .post(format!("{}/v1/messages", e.gw))
+        .header("x-api-key", "k")
+        .header("content-type", "application/json")
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
     assert!(r.status().is_success());
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["content"][0]["text"], "Title");
@@ -427,7 +453,10 @@ async fn upstream_errors_are_relayed() {
 #[tokio::test]
 async fn continuation_error_ends_stream_gracefully() {
     let e = env(vec![
-        sse_script("m1", vec![text_block(0, "Saving."), tool_block(1, "toolu_x", "unimem_recall", &json!({"query":"q"})), end("tool_use", 4)]),
+        sse_script(
+            "m1",
+            vec![text_block(0, "Saving."), tool_block(1, "toolu_x", "unimem_recall", &json!({"query":"q"})), end("tool_use", 4)],
+        ),
         Reply::Status(500, json!({"type":"error","error":{"type":"api_error","message":"boom"}})),
     ])
     .await;
@@ -439,7 +468,11 @@ async fn continuation_error_ends_stream_gracefully() {
 
 #[tokio::test]
 async fn tool_result_turns_are_not_augmented_and_augment_is_stable_on_retry() {
-    let ok = || Reply::Json(json!({"id":"m","type":"message","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}));
+    let ok = || {
+        Reply::Json(
+            json!({"id":"m","type":"message","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}),
+        )
+    };
     let e = env(vec![ok(), ok(), ok()]).await;
     let msgs = json!([{"role":"user","content":"please fix the parser"}]);
     e.post("/v1/messages", &agent_req(msgs.clone(), false)).await.bytes().await.unwrap();
@@ -460,7 +493,9 @@ async fn tool_result_turns_are_not_augmented_and_augment_is_stable_on_retry() {
 #[tokio::test]
 async fn count_tokens_includes_our_tools() {
     let e = env(vec![Reply::Json(json!({"input_tokens": 1234}))]).await;
-    let r = e.post("/v1/messages/count_tokens", &json!({"model":"x","tools": harness_tools(),"messages":[{"role":"user","content":"hi"}]})).await;
+    let r = e
+        .post("/v1/messages/count_tokens", &json!({"model":"x","tools": harness_tools(),"messages":[{"role":"user","content":"hi"}]}))
+        .await;
     assert_eq!(r.json::<Value>().await.unwrap()["input_tokens"], 1234);
     let s = e.seen();
     assert_eq!(s[0].path, "/v1/messages/count_tokens");
@@ -473,10 +508,20 @@ async fn expansion_overlays_never_cross_sessions() {
     // with a hidden unimem_recall round). Session B's follow-up must not get session A's hidden rounds.
     let recall = json!({"query": "release checklist"});
     let round = |id: &str, tool_id: &str| {
-        Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"One moment."},{"type":"tool_use","id":tool_id,"name":"unimem_recall","input":recall}],"stop_reason":"tool_use","usage":{"input_tokens":3,"output_tokens":2}}))
+        Reply::Json(
+            json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"One moment."},{"type":"tool_use","id":tool_id,"name":"unimem_recall","input":recall}],"stop_reason":"tool_use","usage":{"input_tokens":3,"output_tokens":2}}),
+        )
     };
-    let fin = |id: &str| Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"No checklist on file."}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}));
-    let ok = |id: &str| Reply::Json(json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}));
+    let fin = |id: &str| {
+        Reply::Json(
+            json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"No checklist on file."}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}),
+        )
+    };
+    let ok = |id: &str| {
+        Reply::Json(
+            json!({"id":id,"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}),
+        )
+    };
     let e = env(vec![round("a1", "toolu_sessA"), fin("a2"), round("b1", "toolu_sessB"), fin("b2"), ok("a3"), ok("b3")]).await;
     let send = |session: &'static str, body: Value| {
         e.client
@@ -495,7 +540,8 @@ async fn expansion_overlays_never_cross_sessions() {
     let vb: Value = send(SB, agent_req(json!([u1.clone()]), false)).await.unwrap().json().await.unwrap();
     assert_eq!(va["content"], vb["content"], "both sessions see the same visible reply");
 
-    let follow = |v: &Value| agent_req(json!([u1.clone(), {"role":"assistant","content": v["content"]}, {"role":"user","content":"thanks"}]), false);
+    let follow =
+        |v: &Value| agent_req(json!([u1.clone(), {"role":"assistant","content": v["content"]}, {"role":"user","content":"thanks"}]), false);
     send(SA, follow(&va)).await.unwrap().bytes().await.unwrap();
     send(SB, follow(&vb)).await.unwrap().bytes().await.unwrap();
     let seen = e.seen();

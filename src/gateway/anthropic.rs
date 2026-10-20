@@ -57,8 +57,9 @@ use tokio::sync::mpsc;
 
 use super::turn::{self, Live, Turn};
 use super::{
-    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
-    response_headers, send_json, session_from_metadata, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage,
+    record_turn, relay, response_headers, send_json, session_from_metadata, sse, sse_response, trace_usage, upstream_error, usage_header,
+    AppState, ReqInfo, Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -206,7 +207,11 @@ fn texts_of(v: &Value) -> Vec<String> {
 
 fn req_info(headers: &HeaderMap, body: &Value) -> ReqInfo {
     let harness = detect_harness(headers);
-    let first_user = body["messages"].as_array().and_then(|m| m.iter().find(|m| m["role"] == "user")).map(|m| texts_of(&m["content"])).unwrap_or_default();
+    let first_user = body["messages"]
+        .as_array()
+        .and_then(|m| m.iter().find(|m| m["role"] == "user"))
+        .map(|m| texts_of(&m["content"]))
+        .unwrap_or_default();
     let session = header_str(headers, "x-claude-code-session-id")
         .or_else(|| session_from_metadata(&body["metadata"]))
         .unwrap_or_else(|| format!("h:{}", hash_hex(&[&harness, &first_user.join("\n")])));
@@ -279,7 +284,14 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Replayed {
         out.push(json!({"role": "user", "content": p}));
     }
     let n = keys.len();
-    Replayed { messages: out, anchors, hidden, last_key: keys.last().cloned(), last_prev_key: if n >= 2 { keys[n - 2].clone() } else { String::new() }, last_role }
+    Replayed {
+        messages: out,
+        anchors,
+        hidden,
+        last_key: keys.last().cloned(),
+        last_prev_key: if n >= 2 { keys[n - 2].clone() } else { String::new() },
+        last_role,
+    }
 }
 
 // ================================================================ rounds & finalization
@@ -410,7 +422,8 @@ fn tool_results_text(m: &Value) -> String {
 
 /// Inputs of the (harness) tool calls answered by the tool results in `user`.
 fn tool_commands(assistant: &Value, user: &Value) -> String {
-    let ids: Vec<String> = blocks(&user["content"]).iter().filter_map(|b| b.get("tool_use_id").and_then(Value::as_str).map(String::from)).collect();
+    let ids: Vec<String> =
+        blocks(&user["content"]).iter().filter_map(|b| b.get("tool_use_id").and_then(Value::as_str).map(String::from)).collect();
     blocks(&assistant["content"])
         .iter()
         .filter(|b| btype(b) == "tool_use" && b["id"].as_str().is_some_and(|i| ids.iter().any(|x| x == i)))
@@ -484,7 +497,8 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     let prompt = orig.last().and_then(prompt_text);
     let first_user = orig.iter().find(|m| m["role"] == "user");
     let first_hash = first_user.map(|m| user_key(&m["content"])).unwrap_or_default();
-    let summary_key = first_user.filter(|m| turn::has_summary_marker(&text_of_blocks(&blocks(&m["content"])))).map(|m| user_key(&m["content"]));
+    let summary_key =
+        first_user.filter(|m| turn::has_summary_marker(&text_of_blocks(&blocks(&m["content"])))).map(|m| user_key(&m["content"]));
     let n_orig = orig.len();
     let last_orig = orig.last().cloned().unwrap_or(Value::Null);
     let prev_orig = if n_orig >= 2 { orig[n_orig - 2].clone() } else { Value::Null };
@@ -497,7 +511,14 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     }
     let model = body["model"].as_str().unwrap_or("").to_string();
     let beta = header_str(&parts.headers, "anthropic-beta").unwrap_or_default();
-    let live = Live::scan(&json!({"system": body["system"], "tools": body["tools"], "messages": messages}), rp.anchors.clone(), n_orig, first_hash, summary_key).with_hidden(&rp.hidden);
+    let live = Live::scan(
+        &json!({"system": body["system"], "tools": body["tools"], "messages": messages}),
+        rp.anchors.clone(),
+        n_orig,
+        first_hash,
+        summary_key,
+    )
+    .with_hidden(&rp.hidden);
     let mut tn = Turn::begin(&st, &ctx, live, &model, &beta);
     if let Some(last_key) = rp.last_key.as_deref() {
         let anchor = aug_anchor(&info.session, &rp.last_prev_key, last_key);
@@ -554,7 +575,15 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
 
 // ================================================================ non-streaming
 
-async fn non_stream(st: &AppState, ctx: &Ctx, url: &str, headers: &reqwest::header::HeaderMap, mut body: Value, first: reqwest::Response, prev_key: Option<&str>) -> Response {
+async fn non_stream(
+    st: &AppState,
+    ctx: &Ctx,
+    url: &str,
+    headers: &reqwest::header::HeaderMap,
+    mut body: Value,
+    first: reqwest::Response,
+    prev_key: Option<&str>,
+) -> Response {
     let status = first.status().as_u16();
     let up_headers = first.headers().clone();
     let bytes = match first.bytes().await {
@@ -768,10 +797,15 @@ impl Pump<'_> {
 
     /// Close forwarded blocks the upstream never closed (truncated stream), so the client sees valid framing.
     async fn close_open(&mut self) {
-        let open: Vec<usize> = self.blocks.iter_mut().filter(|b| !b.closed && b.out.is_some()).map(|b| {
-            b.closed = true;
-            b.out.unwrap_or(0)
-        }).collect();
+        let open: Vec<usize> = self
+            .blocks
+            .iter_mut()
+            .filter(|b| !b.closed && b.out.is_some())
+            .map(|b| {
+                b.closed = true;
+                b.out.unwrap_or(0)
+            })
+            .collect();
         for o in open {
             let _ = self.send(sse::encode_json(Some("content_block_stop"), &json!({"type": "content_block_stop", "index": o}))).await;
         }
@@ -829,7 +863,16 @@ async fn stream_task(
     let mut last_seq: Value;
     let mut conts = 0;
     loop {
-        let mut p = Pump { tx: &tx, out_next: &mut out_next, started: &mut started, blocks: vec![], stop_reason: Value::Null, stop_sequence: Value::Null, usage: Value::Null, start_usage: Value::Null };
+        let mut p = Pump {
+            tx: &tx,
+            out_next: &mut out_next,
+            started: &mut started,
+            blocks: vec![],
+            stop_reason: Value::Null,
+            stop_sequence: Value::Null,
+            usage: Value::Null,
+            start_usage: Value::Null,
+        };
         let end = pump_round(resp, &mut p).await;
         if matches!(end, RoundEnd::ClientGone | RoundEnd::UpstreamError) {
             tracing::debug!("stream ended early: {end:?}");
@@ -926,11 +969,25 @@ mod tests {
 
     #[test]
     fn blk_reconstruction() {
-        let mut b = Blk { up: 0, v: json!({"type":"tool_use","id":"a","name":"unimem_recall","input":{}}), json: String::new(), ours: true, out: None, closed: false };
+        let mut b = Blk {
+            up: 0,
+            v: json!({"type":"tool_use","id":"a","name":"unimem_recall","input":{}}),
+            json: String::new(),
+            ours: true,
+            out: None,
+            closed: false,
+        };
         b.apply(&json!({"type":"input_json_delta","partial_json":"{\"query\":"}));
         b.apply(&json!({"type":"input_json_delta","partial_json":"\"x\"}"}));
         assert_eq!(b.finish()["input"], json!({"query":"x"}));
-        let mut t = Blk { up: 1, v: json!({"type":"thinking","thinking":"","signature":""}), json: String::new(), ours: false, out: Some(0), closed: false };
+        let mut t = Blk {
+            up: 1,
+            v: json!({"type":"thinking","thinking":"","signature":""}),
+            json: String::new(),
+            ours: false,
+            out: Some(0),
+            closed: false,
+        };
         t.apply(&json!({"type":"thinking_delta","thinking":"ab"}));
         t.apply(&json!({"type":"signature_delta","signature":"sig"}));
         assert_eq!(t.finish(), json!({"type":"thinking","thinking":"ab","signature":"sig"}));

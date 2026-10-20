@@ -17,32 +17,49 @@ macro_rules! re {
 }
 
 // Vendor-format credentials and private keys: always secrets (unless a documented dummy value, see below).
-re!(secret_re, r#"(?x)
+re!(
+    secret_re,
+    r#"(?x)
     (sk-[A-Za-z0-9_\-]{20,}) | (sk-ant-[A-Za-z0-9_\-]{20,}) | (gh[pousr]_[A-Za-z0-9]{30,}) | (github_pat_[A-Za-z0-9_]{30,})
   | (AKIA[0-9A-Z]{16}) | (xox[baprs]-[A-Za-z0-9\-]{10,}) | (AIza[0-9A-Za-z_\-]{35}) | (GOCSPX-[A-Za-z0-9_\-]{16,})
   | (-----BEGIN\ [A-Z\ ]*PRIVATE\ KEY-----) | (eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,})
   | ((?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}) | (whsec_[A-Za-z0-9]{16,})
   | ((?i)\bbearer\s+[A-Za-z0-9._~+/=\-]{20,})
-"#);
+"#
+);
 // A credential keyword followed by a value: `password: x`, `token=x`, `password hunter2!`, `密码是 x`.
-re!(keyed_secret_re, r#"(?ix)
+re!(
+    keyed_secret_re,
+    r#"(?ix)
     (?:^|[^A-Za-z0-9_])(?:password|passwd|passphrase|pwd|secret|client[_\ -]?secret|api[_\ -]?key|access[_\ -]?key|auth[_\ -]?token|token)
     (?:\s+is)?\s*(?:[:=]|\s)\s*['"“]?([\x21-\x7e]{6,})
   | (?:密码|口令|密钥|秘钥|私钥|令牌)\s*(?:是|为|:|：|=)\s*['"“]?([\x21-\x7e]{6,})
   | (?:password|passwd|passphrase|secret|token|api[_\ -]?key)\b[^.:：\n]{0,40}[:：]\s*['"“]?([\x21-\x7e]{6,})
-"#);
-re!(secret_kw_re, r"(?i)(password|passwd|passphrase|secret|token|\bkey\b|api[_ -]?key|access[_ -]?key|credential|creds|login|private[_ -]?key|密码|口令|密钥|秘钥|私钥|令牌|凭据)");
+"#
+);
+re!(
+    secret_kw_re,
+    r"(?i)(password|passwd|passphrase|secret|token|\bkey\b|api[_ -]?key|access[_ -]?key|credential|creds|login|private[_ -]?key|密码|口令|密钥|秘钥|私钥|令牌|凭据)"
+);
 re!(long_token_re, r"[A-Za-z0-9_\-+/=.]{20,}");
 // References to where a secret lives, not the secret itself.
-re!(secret_ref_re, r#"(?ix)^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\{\{.*|env(_var)?\(|os\.environ|process\.env|op://|<[^>]*>?|\[[^\]]*\]?|vault:|secret://|keychain|\*{3,}|x{4,}|\.{3,})"#);
+re!(
+    secret_ref_re,
+    r#"(?ix)^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\{\{.*|env(_var)?\(|os\.environ|process\.env|op://|<[^>]*>?|\[[^\]]*\]?|vault:|secret://|keychain|\*{3,}|x{4,}|\.{3,})"#
+);
 // Spans that *reference* a secret store or variable: removed before scanning (`op read 'op://…'`,
 // `env_var('X')`, `${X}`, `{{ env … }}`, `$X`, `os.environ[...]`, `process.env.X`, vault paths).
-re!(secret_ref_span_re, r#"(?ix)(
+re!(
+    secret_ref_span_re,
+    r#"(?ix)(
     \bop\s+(read|run|item\s+get)\b[^\n`]* | op://\S+ | \benv(_var)?\s*\(\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?\s*\) | \{\{[^}]*\}\}
   | \$\{[A-Za-z_][A-Za-z0-9_]*\} | \$[A-Z_][A-Z0-9_]{2,} | os\.environ\S* | process\.env\.\w+ | \bvault:\S+ | secret://\S+
-)"#);
+)"#
+);
 
-re!(injection_re, r"(?ix)(
+re!(
+    injection_re,
+    r"(?ix)(
     ignore\s+(all\s+|any\s+)?(of\s+)?(the\s+|your\s+)?(previous|prior|above|earlier)\s+(instructions|rules|prompts?)
   | disregard\s+(the|your|all|any)\s+(user'?s?\s+|system\s+|previous\s+|prior\s+)?(instructions|rules|requests|prompts?)
   | disregard\s+(the|your|all)\s+(system|previous|prior)
@@ -56,9 +73,12 @@ re!(injection_re, r"(?ix)(
   | 忽略.{0,12}(指令|指示|规则|提示|设定)
   | (不要|别|不得|切勿)(告诉|通知|告知|让)用户
   | 你的新(指令|任务|角色|身份) | 新的系统(指令|提示) | 你现在是
-)");
+)"
+);
 // The text addresses an AI assistant / agent directly.
-re!(addressed_ai_re, r"(?ix)(
+re!(
+    addressed_ai_re,
+    r"(?ix)(
     \b(note|message|instruction|instructions|notice|reminder|directive|memo)s?\s+(for|to)\s+(any|all|every|each|the)?\s*(ai|llm|coding)?\s*(assistant|agent|model|bot|copilot|llm|ai)s?\b
   | \b(any|all|every|each)\s+(ai|llm|coding)?\s*(assistant|agent|model|bot)s?\s+(reading|processing|working|that\s+reads|seeing|who\s+reads)
   | \b(dear|attention|hey|hello)\s*,?\s+(ai|llm|assistant|agent|model|bot)s?\b
@@ -68,9 +88,12 @@ re!(addressed_ai_re, r"(?ix)(
   | \b(maintainer|admin|administrator|owner|operator|repo\s+owner|author)s?['’]?s?\s+(instruction|directive|order|override)s?\b
   | (致|给|写给|告诉|提醒|通知)(所有|任何|各位|每个|每一个)?\s*(ai|AI|人工智能|智能)?\s*(助手|智能体|大模型|模型|机器人|代理|agent|Agent|AI)
   | (ai|AI)\s*(助手|智能体)(们)?\s*[：:，,]
-)");
+)"
+);
 // Imperatives that change an assistant's behaviour, hide actions from the user, or move data out.
-re!(hostile_imperative_re, r"(?ix)(
+re!(
+    hostile_imperative_re,
+    r"(?ix)(
     \bwithout\s+(asking|confirmation|confirming|telling|mentioning|informing|notifying|approval)\b
   | \b(silently|quietly|secretly|covertly)\b
   | \b(do\s+not|don'?t|never)\s+(mention|disclose|reveal|tell|report|log|show)\b
@@ -84,15 +107,21 @@ re!(hostile_imperative_re, r"(?ix)(
   | (不要|别|不得|切勿)(提及|提到|说明|告诉|告知|通知|透露)
   | 已(经)?(获得|得到)?授权 | 悄悄 | 偷偷 | 静默(地)? | 从现在(开始|起)
   | (上传|发送|发到|传到|转发)[^。\n]{0,40}(https?://|服务器|外部)
-)");
+)"
+);
 // The note *describes* such text (a fixture, a test case, an example) rather than issuing it.
-re!(describes_re, r"(?ix)(\bfixtures?\b|\btest\s+(case|data|input|page|string|corpus)s?\b|\bexamples?\b|\bsamples?\b|\be\.g\.|\bdeliberately\b|\bon\s+purpose\b|\bcontains\s+(text|strings?|phrases?)\b|\bregression\s+tests?\b|\bto\s+(check|verify|test|ensure)\s+that\b|示例|样例|例子|测试用例|测试数据|故意)");
+re!(
+    describes_re,
+    r"(?ix)(\bfixtures?\b|\btest\s+(case|data|input|page|string|corpus)s?\b|\bexamples?\b|\bsamples?\b|\be\.g\.|\bdeliberately\b|\bon\s+purpose\b|\bcontains\s+(text|strings?|phrases?)\b|\bregression\s+tests?\b|\bto\s+(check|verify|test|ensure)\s+that\b|示例|样例|例子|测试用例|测试数据|故意)"
+);
 // URLs and host names: "example" in `drop.example.org` describes nothing.
 re!(url_host_re, r"https?://\S+|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|dev|app|xyz|co|me|sh)\b\S*");
 re!(quoted_re, r#"'[^'\n]{6,}'|"[^"\n]{6,}"|“[^”\n]{6,}”|`[^`\n]{6,}`|‘[^’\n]{6,}’"#);
 
 // Plan / progress / next-step language: the note will go stale silently.
-re!(status_rot_re, r"(?ix)(
+re!(
+    status_rot_re,
+    r"(?ix)(
     \bnext\s+step\b | \bnext,?\s+i('|\s+wi)ll\b | ^\s*todo\b | \btodo\s*[:：(] | \bin\s+progress\b | \bhalf[\s-]done\b | \bmid-?way\s+through\b
   | \bin\s+the\s+middle\s+of\b | \bcurrently\s+(working|doing|debugging|fixing|refactoring|investigating|mid-?way|in\s+the\s+middle|blocked)\b
   | \bi\s+am\s+(now\s+)?(working|going)\s+to\b | \bi'?m\s+(currently\s+)?(working\s+on|in\s+the\s+middle|debugging|fixing)\b | \bright\s+now\b
@@ -100,10 +129,13 @@ re!(status_rot_re, r"(?ix)(
   | \b(today|tonight|tomorrow|this\s+(afternoon|morning|evening))\b[^.\n]{0,40}\b(i('|\s+wi)ll|i\s+need\s+to|i\s+have\s+to|going\s+to|first)\b
   | 下一步 | 接下来(我|要) | 正在(做|改|修|写|处理|进行|调|排查|开发|重构|实现|弄|搞|测|跑|看|赶|准备|等|迁|查) | 待办 | 改到一半 | 做到一半 | 还没(做|改|写|弄)完 | (今天|明天|今晚|下午)(先|再|要|继续)
   | (目前|当前|现在)(正)?在(做|改|修|写|处理|进行|调试|调|排查|开发|重构|实现|弄|搞|测|跑|看)
-)");
+)"
+);
 
 // Preference *about the user* that holds regardless of which project they are in.
-re!(user_pref_re, r"(?ix)(
+re!(
+    user_pref_re,
+    r"(?ix)(
     \bi\s+(really\s+)?(prefer|like|love|hate|dislike|always|never|want|don'?t\s+want|usually|tend\s+to)\b
   | \bmy\s+(preference|preferences|style|habit|habits|setup|workflow|default)\b
   | \b(the\s+)?user\s+(prefers|wants|likes|hates|dislikes|always|never|uses)\b
@@ -113,56 +145,96 @@ re!(user_pref_re, r"(?ix)(
   | 我(一般|总是|从不|习惯|喜欢|偏好|讨厌|希望|平时|通常|不喜欢|更喜欢)
   | 用户(喜欢|偏好|希望|要求|习惯|讨厌)
   | 所有项目|任何项目|每个项目|以后都|一律|永远不要
-)");
+)"
+);
 // First person singular: the note is about the user ("I", "my", 我 but not 我们).
 re!(first_person_re, r"(?i)(\b(i|i'm|i've|i'd|i'll|me|my|mine|myself)\b|我[^们]|我$)");
 // The note addresses the assistant about how to work with the user.
-re!(addresses_assistant_re, r"(?ix)(
+re!(
+    addresses_assistant_re,
+    r"(?ix)(
     \bplease\b | \b(suggest|recommend|tell|ask|show|give|send|remind|ping)\s+me\b
   | \b(you|your)\s+(suggest|recommend|design|propose|generate|answer|reply|write|make|build)\b
   | \b(don'?t|do\s+not|never)\s+(suggest|recommend|propose)\b
   | 请[^求教示] | 给我 | 帮我 | 问我 | 告诉我 | 跟我说 | 回复我 | 回答我 | 提醒我
-)");
+)"
+);
 // Universal quantifiers over the user's work.
-re!(generic_scope_re, r"(?ix)(
+re!(
+    generic_scope_re,
+    r"(?ix)(
     \b(in|across|for)\s+(all|every|any)\s+(of\s+)?(my\s+)?(projects?|repos?|repositories|languages?|code|codebases?)\b
   | \bper[\s-](repo|repository|project)\b | \b(anywhere|everywhere|by\s+default)\b | \bin\s+any\b
   | 一律 | 所有项目 | 任何项目 | 每个项目 | 以后都 | 永远 | 默认
-)");
+)"
+);
 // A rule phrased as an imperative or a convention (sentence-initial imperative verb, Chinese prohibitions).
-re!(imperative_re, r"(?ix)(
+re!(
+    imperative_re,
+    r"(?ix)(
     (^|[.;:!?,]\s+|^\s*)(never|always|don'?t|do\s+not|avoid|prefer|use|write|keep|put|add|update|start|follow|name|split|wrap|reply|answer|ask|make\s+sure|no|reproduce|check|explain|show|mention|include|rebase|squash|confirm|double-check)\b
   | (^|[。；：！？，])\s*(不要|别|不准|禁止|务必|始终|总是|永远) | 尽量 | 一律
-)");
+)"
+);
 // The note speaks for a team ("we", "our") rather than for the user alone.
 re!(team_re, r"(?i)(\b(we|our|we're|we've|we'll|us|ours)\b|我们|咱们)");
 // Something specific to a codebase: paths, code spans, file names, snake_case / CamelCase identifiers.
-re!(code_specific_re, r"(`[^`]{2,60}`|(?:^|[\s(（“])\.{0,2}/?[\w.\-]+/[\w.\-/*<>]*|\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\b|\b[a-z]+_[a-z_0-9]+\b|\b[\w\-]+\.(?:rs|py|ts|tsx|js|go|toml|json|ya?ml|md|sh|swift|kt|java|rb|cs|cpp|h|lock|cfg|ini|xml|gradle|tex|bib|html|css)\b)");
+re!(
+    code_specific_re,
+    r"(`[^`]{2,60}`|(?:^|[\s(（“])\.{0,2}/?[\w.\-]+/[\w.\-/*<>]*|\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\b|\b[a-z]+_[a-z_0-9]+\b|\b[\w\-]+\.(?:rs|py|ts|tsx|js|go|toml|json|ya?ml|md|sh|swift|kt|java|rb|cs|cpp|h|lock|cfg|ini|xml|gradle|tex|bib|html|css)\b)"
+);
 re!(home_path_re, r"(~/|\$HOME/|%USERPROFILE%)\S*");
 re!(capword_re, r"\b[A-Z][A-Za-z0-9]+\b");
 
 // The note explicitly ties itself to the project it was written in.
-re!(this_project_re, r"(?ix)(
+re!(
+    this_project_re,
+    r"(?ix)(
     \b(this|our|the\s+current)\s+(project|repo|repository|codebase|monorepo|workspace|app|service|crate|package)\b
   | \bin\s+here\b | \bhere\s+we\b | \w\s+here\s*[:：,;] | \bhere\s+(the|our|all|every)\b
   | (这个|本|该|此|当前)(项目|仓库|代码库|工程|服务|应用)
-)");
-re!(question_re, r"(?ix)(
+)"
+);
+re!(
+    question_re,
+    r"(?ix)(
     [?？] | ^\s*(what|how|why|where|which|when|who|whom|whose|is|are|do|does|did|can|could|should|would|will)\b
   | 什么|怎么|怎样|为什么|为啥|哪|吗|呢|如何|多少|几|是否|有没有
-)");
+)"
+);
 re!(reason_re, r"(?i)(\breasons?\b|\brationale\b|\bbackground\s+(on|for)\b|\bmotivation\b|\bwhy\s+we\b|背景|理由|缘由|原因|之所以)");
 // Identifier with a numeric suffix (`auth-12`, `shard_3`): the digits name a thing, they are not a value.
 re!(ident_num_re, r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*[-_]\d+[A-Za-z0-9]*");
-re!(pref_re, r"(?i)(\bi (prefer|like|hate|always|never|want)\b|\bmy (preference|style|habit)\b|\b(always|never) (use|do|write)\b|\buser (prefers|wants|likes)\b|\bin (all|every) (my )?projects?\b|我(喜欢|偏好|习惯|讨厌|一般|总是|从不)|用户(喜欢|偏好|希望|要求)|所有项目|以后都|每次都)");
-re!(decision_re, r"(?i)(\b(decided|chose|we use|we'll use|switched to|moved to|migrated to|instead of|rather than)\b|决定|选择了|改用|换成|迁移到|而不是)");
-re!(procedure_re, r"(?i)(\b(run|to deploy|to release|to build|steps?:|command|via|through)\b.*(`|\./|\.sh|make |cargo |npm |pnpm |uv |docker )|步骤|执行|运行.*(命令|脚本))");
-re!(gotcha_re, r"(?i)(\b(gotcha|careful|beware|pitfall|caveat|bug|breaks?|fails?|flaky|don't|do not|must not|workaround)\b|坑|注意|别|不要|不能|小心|会导致|报错|失败)");
+re!(
+    pref_re,
+    r"(?i)(\bi (prefer|like|hate|always|never|want)\b|\bmy (preference|style|habit)\b|\b(always|never) (use|do|write)\b|\buser (prefers|wants|likes)\b|\bin (all|every) (my )?projects?\b|我(喜欢|偏好|习惯|讨厌|一般|总是|从不)|用户(喜欢|偏好|希望|要求)|所有项目|以后都|每次都)"
+);
+re!(
+    decision_re,
+    r"(?i)(\b(decided|chose|we use|we'll use|switched to|moved to|migrated to|instead of|rather than)\b|决定|选择了|改用|换成|迁移到|而不是)"
+);
+re!(
+    procedure_re,
+    r"(?i)(\b(run|to deploy|to release|to build|steps?:|command|via|through)\b.*(`|\./|\.sh|make |cargo |npm |pnpm |uv |docker )|步骤|执行|运行.*(命令|脚本))"
+);
+re!(
+    gotcha_re,
+    r"(?i)(\b(gotcha|careful|beware|pitfall|caveat|bug|breaks?|fails?|flaky|don't|do not|must not|workaround)\b|坑|注意|别|不要|不能|小心|会导致|报错|失败)"
+);
 re!(because_re, r"(?i)(\bbecause\b|\bsince\b|\bso that\b|\bdue to\b|\bcaused by\b|\bthe reason\b|因为|由于|所以|导致|原因)");
-re!(entity_re, r"(`[^`]{2,60}`|\b[\w.\-]+/[\w.\-/]+\b|\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\b|\b[a-z]+_[a-z_0-9]+\b|\b[\w\-]+\.(?:rs|py|ts|js|go|toml|json|ya?ml|md|sh|swift)\b)");
+re!(
+    entity_re,
+    r"(`[^`]{2,60}`|\b[\w.\-]+/[\w.\-/]+\b|\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\b|\b[a-z]+_[a-z_0-9]+\b|\b[\w\-]+\.(?:rs|py|ts|js|go|toml|json|ya?ml|md|sh|swift)\b)"
+);
 re!(digits_re, r"\d+(?:[.:]\d+)*");
-re!(ack_re, r"(?i)^\s*(ok(ay)?|yes|yep|no|nope|thanks?( you)?|thx|go on|continue|proceed|lgtm|sure|好的?|嗯+|是的?|继续|可以|行|谢谢|收到|对)[\s.!。！]*$");
-re!(multihop_re, r"(?i)(\bwhy\b|\bwhen\b|\bhow come\b|\bbefore\b|\bafter\b|\bhistory\b|\bchanged?\b|\bwhat happened\b|\bwhat (made|drove|caused|forced|pushed|led)\b|\breasons?\b|\bmotivation\b|\bstill\b|\bever\b|为什么|为啥|原因|什么时候|何时|之前|之后|历史|变更|改过)");
+re!(
+    ack_re,
+    r"(?i)^\s*(ok(ay)?|yes|yep|no|nope|thanks?( you)?|thx|go on|continue|proceed|lgtm|sure|好的?|嗯+|是的?|继续|可以|行|谢谢|收到|对)[\s.!。！]*$"
+);
+re!(
+    multihop_re,
+    r"(?i)(\bwhy\b|\bwhen\b|\bhow come\b|\bbefore\b|\bafter\b|\bhistory\b|\bchanged?\b|\bwhat happened\b|\bwhat (made|drove|caused|forced|pushed|led)\b|\breasons?\b|\bmotivation\b|\bstill\b|\bever\b|为什么|为啥|原因|什么时候|何时|之前|之后|历史|变更|改过)"
+);
 
 /// Values that are published, documented placeholders (e.g. the AWS documentation example key pair).
 const DOCUMENTED_DUMMIES: &[&str] = &["AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"];
@@ -213,7 +285,8 @@ fn credential_value(v: &str) -> bool {
     let symbols = v.chars().any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-');
     let classes = [letters, digits, symbols].iter().filter(|x| **x).count();
     // a snake_case / kebab-case identifier or a plain word names something (`token_store`), it is not a value
-    let identifier = v.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c == '-') || v.chars().all(|c| c.is_ascii_uppercase() || c == '_');
+    let identifier =
+        v.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c == '-') || v.chars().all(|c| c.is_ascii_uppercase() || c == '_');
     !identifier && (classes >= 2 || high_entropy_token(v))
 }
 
@@ -304,8 +377,8 @@ pub fn is_user_preference(s: &str) -> bool {
 }
 re!(conditional_re, r"(?i)(?:^|[.!?;]\s+)(?:when|whenever|before|after|if|once|while)\b[^,.;:!?]{3,80}[,:]\s*([a-z]+)\b");
 const NOT_IMPERATIVE: &[&str] = &[
-    "the", "a", "an", "it", "its", "we", "they", "this", "that", "there", "these", "those", "our", "their", "i", "he", "she", "you", "your",
-    "my", "his", "her", "which", "what", "then", "so", "and", "but", "or", "is", "are", "was", "were", "be", "has", "have",
+    "the", "a", "an", "it", "its", "we", "they", "this", "that", "there", "these", "those", "our", "their", "i", "he", "she", "you",
+    "your", "my", "his", "her", "which", "what", "then", "so", "and", "but", "or", "is", "are", "was", "were", "be", "has", "have",
 ];
 /// A rule phrased as a condition and an imperative: "When reviewing a diff, list …", "Before merging: rebase …".
 fn conditional_imperative(s: &str) -> bool {
@@ -379,7 +452,17 @@ fn is_cjk(c: char) -> bool {
 /// Rough information content of a short message in "Latin-character equivalents": a CJK character carries about
 /// as much as two Latin letters (a short CJK question is as informative as a much longer English one).
 pub fn info_units(s: &str) -> usize {
-    s.chars().map(|c| if is_cjk(c) { 2 } else if c.is_alphanumeric() { 1 } else { 0 }).sum()
+    s.chars()
+        .map(|c| {
+            if is_cjk(c) {
+                2
+            } else if c.is_alphanumeric() {
+                1
+            } else {
+                0
+            }
+        })
+        .sum()
 }
 
 /// Prior that a (passive) prompt benefits from long-term memory, from its information content. Questions raise it.
@@ -400,11 +483,11 @@ pub fn gate_prior(q: &str) -> f64 {
 }
 
 const STOPWORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "as", "is", "are", "was", "were",
-    "be", "been", "being", "it", "its", "this", "that", "these", "those", "we", "our", "us", "you", "your", "i", "my", "me", "he", "she",
-    "they", "them", "their", "so", "if", "then", "than", "not", "no", "do", "does", "did", "has", "have", "had", "will", "would", "can",
-    "could", "should", "now", "also", "just", "all", "any", "some", "via", "up", "out", "there", "here", "which", "what", "when", "who",
-    "how", "use", "uses", "used", "using", "的", "了", "是", "在", "和", "与", "也", "都", "就", "我们", "现在",
+    "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "as", "is", "are", "was",
+    "were", "be", "been", "being", "it", "its", "this", "that", "these", "those", "we", "our", "us", "you", "your", "i", "my", "me", "he",
+    "she", "they", "them", "their", "so", "if", "then", "than", "not", "no", "do", "does", "did", "has", "have", "had", "will", "would",
+    "can", "could", "should", "now", "also", "just", "all", "any", "some", "via", "up", "out", "there", "here", "which", "what", "when",
+    "who", "how", "use", "uses", "used", "using", "的", "了", "是", "在", "和", "与", "也", "都", "就", "我们", "现在",
 ];
 
 pub fn is_stopword(t: &str) -> bool {
@@ -412,9 +495,54 @@ pub fn is_stopword(t: &str) -> bool {
 }
 
 const QUESTION_WORDS: &[&str] = &[
-    "what", "whats", "how", "why", "where", "which", "when", "who", "whom", "whose", "is", "are", "do", "does", "did", "can", "could",
-    "should", "would", "will", "s", "t", "re", "ve", "ll", "d", "m", "anything", "something", "ever", "get", "got", "need", "know", "tell",
-    "什么", "怎么", "怎样", "为什么", "为啥", "哪个", "哪里", "哪些", "如何", "多少", "是否", "有没", "没有",
+    "what",
+    "whats",
+    "how",
+    "why",
+    "where",
+    "which",
+    "when",
+    "who",
+    "whom",
+    "whose",
+    "is",
+    "are",
+    "do",
+    "does",
+    "did",
+    "can",
+    "could",
+    "should",
+    "would",
+    "will",
+    "s",
+    "t",
+    "re",
+    "ve",
+    "ll",
+    "d",
+    "m",
+    "anything",
+    "something",
+    "ever",
+    "get",
+    "got",
+    "need",
+    "know",
+    "tell",
+    "什么",
+    "怎么",
+    "怎样",
+    "为什么",
+    "为啥",
+    "哪个",
+    "哪里",
+    "哪些",
+    "如何",
+    "多少",
+    "是否",
+    "有没",
+    "没有",
 ];
 /// Interrogative / filler words of a question: they carry no topic.
 pub fn is_question_word(t: &str) -> bool {
@@ -457,12 +585,92 @@ pub fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
 
 /// Predicate / change words: they say *what happened* to a subject, not which subject it is.
 const PREDICATES: &[&str] = &[
-    "now", "moved", "move", "moves", "switched", "switch", "changed", "change", "changes", "runs", "run", "ran", "set", "lives", "live",
-    "located", "upgraded", "upgrade", "bumped", "bump", "migrated", "migrate", "updated", "update", "became", "becomes", "is", "are",
-    "was", "were", "default", "defaults", "currently", "instead", "anymore", "longer", "raised", "raise", "lowered", "lower", "increased",
-    "increase", "decreased", "decrease", "reduced", "reduce", "dropped", "drop", "replaced", "replace", "went", "goes", "go", "off", "onto",
-    "stays", "stay", "still", "new", "old", "retired", "halved", "doubled", "down", "today", "week", "starting", "longer",
-    "改为", "改成", "换成", "迁移", "调整", "升级", "现在", "改到", "改用", "降到", "升到", "提高", "降低", "缩短", "延长", "已经", "不再", "目前",
+    "now",
+    "moved",
+    "move",
+    "moves",
+    "switched",
+    "switch",
+    "changed",
+    "change",
+    "changes",
+    "runs",
+    "run",
+    "ran",
+    "set",
+    "lives",
+    "live",
+    "located",
+    "upgraded",
+    "upgrade",
+    "bumped",
+    "bump",
+    "migrated",
+    "migrate",
+    "updated",
+    "update",
+    "became",
+    "becomes",
+    "is",
+    "are",
+    "was",
+    "were",
+    "default",
+    "defaults",
+    "currently",
+    "instead",
+    "anymore",
+    "longer",
+    "raised",
+    "raise",
+    "lowered",
+    "lower",
+    "increased",
+    "increase",
+    "decreased",
+    "decrease",
+    "reduced",
+    "reduce",
+    "dropped",
+    "drop",
+    "replaced",
+    "replace",
+    "went",
+    "goes",
+    "go",
+    "off",
+    "onto",
+    "stays",
+    "stay",
+    "still",
+    "new",
+    "old",
+    "retired",
+    "halved",
+    "doubled",
+    "down",
+    "today",
+    "week",
+    "starting",
+    "longer",
+    "改为",
+    "改成",
+    "换成",
+    "迁移",
+    "调整",
+    "升级",
+    "现在",
+    "改到",
+    "改用",
+    "降到",
+    "升到",
+    "提高",
+    "降低",
+    "缩短",
+    "延长",
+    "已经",
+    "不再",
+    "目前",
 ];
 
 fn is_predicate(t: &str) -> bool {
@@ -500,17 +708,23 @@ pub fn specific_names(s: &str) -> HashSet<String> {
 }
 
 // Language that announces a change of state: the new note replaces an older one on the same subject.
-re!(change_re, r"(?ix)(
+re!(
+    change_re,
+    r"(?ix)(
     \b(switched|migrated|moved|replaced|upgraded|downgraded|bumped|raised|lowered|increased|decreased|reduced|changed|renamed|retired|dropped|deprecated|halved|doubled|relocated|lifted|shortened|extended|tightened|loosened)\b
   | \bnow\b | \bno\s+longer\b | \binstead\s+of\b | \btakes?\s+over\b | \bhas\s+left\b | \bdown\s+to\b | \bnot\s+anymore\b | \bany\s?more\b
   | 改用 | 换成 | 换到 | 迁移到 | 迁到 | 迁移 | 现在 | 改成 | 改为 | 改到 | 升级到 | 升到 | 降到 | 已经 | 不再 | 缩短 | 延长 | 提高到 | 调到 | 调整为 | 接手
-)");
+)"
+);
 /// The note announces a change ("switched to", "now uses", 改用, 换成, 迁移到, 现在用 …).
 pub fn announces_change(s: &str) -> bool {
     change_re().is_match(s)
 }
 // A note that *explains* (a cause / motivation), as opposed to stating the current value.
-re!(explains_re, r"(?ix)(\bbecause\b|\bdue\s+to\b|\bcaused\s+by\b|\bthe\s+reason\b|\breasons?\b|\bwhy\b|\bforced\b|\bmotivat|\bso\s+that\b|\bin\s+order\s+to\b|\bwhich\s+is\s+what\b|\bthat'?s\s+why\b|\bpushed\s+(us|me)\b|\bwas\s+(a|the)\s+problem\b|\bkept\s+(crashing|failing|segfaulting|timing\s+out|breaking|hanging)\b|\btoo\s+(slow|expensive|costly|big|large|flaky)\b|\bwould\s+have\s+cost\b|\b(after|when)\s+(a|an|the|someone|somebody|we|it|they)\s+\w+(ed|ran|broke|lost|went)\b|\bdropped\s+support\b|\bend\s+of\s+life\b|\bviolat|因为|由于|所以|导致|原因|之所以|是因为|为了|理由|起因|否则|不然|太慢|太贵|来自)");
+re!(
+    explains_re,
+    r"(?ix)(\bbecause\b|\bdue\s+to\b|\bcaused\s+by\b|\bthe\s+reason\b|\breasons?\b|\bwhy\b|\bforced\b|\bmotivat|\bso\s+that\b|\bin\s+order\s+to\b|\bwhich\s+is\s+what\b|\bthat'?s\s+why\b|\bpushed\s+(us|me)\b|\bwas\s+(a|the)\s+problem\b|\bkept\s+(crashing|failing|segfaulting|timing\s+out|breaking|hanging)\b|\btoo\s+(slow|expensive|costly|big|large|flaky)\b|\bwould\s+have\s+cost\b|\b(after|when)\s+(a|an|the|someone|somebody|we|it|they)\s+\w+(ed|ran|broke|lost|went)\b|\bdropped\s+support\b|\bend\s+of\s+life\b|\bviolat|因为|由于|所以|导致|原因|之所以|是因为|为了|理由|起因|否则|不然|太慢|太贵|来自)"
+);
 pub fn explains(s: &str) -> bool {
     explains_re().is_match(s)
 }
@@ -526,10 +740,9 @@ fn specific_tokens(s: &str) -> HashSet<String> {
     // identifiers: something a plain hyphenated word ("self-hosted") is not — a digit, a dot / slash / underscore,
     // or an inner capital
     names.extend(
-        specific_name_re()
-            .find_iter(s)
-            .map(|m| m.as_str().to_string())
-            .filter(|n| n.chars().any(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '_')) || n.chars().skip(1).any(|c| c.is_uppercase())),
+        specific_name_re().find_iter(s).map(|m| m.as_str().to_string()).filter(|n| {
+            n.chars().any(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '_')) || n.chars().skip(1).any(|c| c.is_uppercase())
+        }),
     );
     names.extend(code_or_kv_re().find_iter(s).map(|m| m.as_str().to_string()));
     let mut out = HashSet::new();
@@ -592,7 +805,8 @@ pub fn relate(new: &str, old: &str, idf: &dyn Fn(&str) -> f64) -> Relation {
     let (sa, sb) = (specific_names(new), specific_names(old));
     // a substitution of names only counts when neither side's names are mentioned by the other at all
     let names_swapped = unseen_names(new, old) > 0 && unseen_names(old, new) > 0;
-    let name_substitution = sa.difference(&sb).next().is_some() && sb.difference(&sa).next().is_some() && sa.is_disjoint(&sb) && names_swapped;
+    let name_substitution =
+        sa.difference(&sb).next().is_some() && sb.difference(&sa).next().is_some() && sa.is_disjoint(&sb) && names_swapped;
     // `macos-14` → `macos-15` in a note that announces a change, while both notes share another specific name, is a
     // new *value* of the same thing; without that, `worker-3` vs `worker-8` are two different things.
     let family = |x: &String| x.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end_matches(['-', '_']).to_string();
@@ -610,12 +824,16 @@ pub fn relate(new: &str, old: &str, idf: &dyn Fn(&str) -> f64) -> Relation {
         substitution: a.difference(&b).next().is_some() && b.difference(&a).next().is_some(),
         slot_swap: {
             let plain = |x: &&String| !x.starts_with('~');
-            let (xa, xb): (Vec<&String>, Vec<&String>) = (a.difference(&b).filter(plain).collect(), b.difference(&a).filter(plain).collect());
+            let (xa, xb): (Vec<&String>, Vec<&String>) =
+                (a.difference(&b).filter(plain).collect(), b.difference(&a).filter(plain).collect());
             let shared = a.intersection(&b).filter(plain).count();
             let (ta, tb) = (specific_tokens(new), specific_tokens(old));
             let one_for_one = xa.len() == 1 && xb.len() == 1 && shared >= 4;
             one_for_one
-                || (1..=3).contains(&xa.len()) && (1..=3).contains(&xb.len()) && shared >= 3 && shared >= xa.len().max(xb.len())
+                || (1..=3).contains(&xa.len())
+                    && (1..=3).contains(&xb.len())
+                    && shared >= 3
+                    && shared >= xa.len().max(xb.len())
                     && (xa.iter().any(|t| ta.contains(*t)) || xb.iter().any(|t| tb.contains(*t)))
         },
         new_announces_change: announces_change(new) && !announces_change(old),
@@ -715,12 +933,18 @@ pub fn is_ack(s: &str) -> bool {
 pub fn looks_multihop(s: &str) -> bool {
     multihop_re().is_match(s)
 }
-re!(why_re, r"(?i)(\bwhy\b|\bhow\s+come\b|\bwhat\s+(made|drove|caused|forced|pushed|led)\b|\breasons?\b|\bmotivation\b|\brationale\b|为什么|为啥|原因|理由|怎么会)");
+re!(
+    why_re,
+    r"(?i)(\bwhy\b|\bhow\s+come\b|\bwhat\s+(made|drove|caused|forced|pushed|led)\b|\breasons?\b|\bmotivation\b|\brationale\b|为什么|为啥|原因|理由|怎么会)"
+);
 /// The query asks for a reason.
 pub fn asks_why(s: &str) -> bool {
     why_re().is_match(s)
 }
-re!(history_re, r"(?i)(\bwhen\b|\bbefore\b|\bhistory\b|\bchanged?\b|\bstill\b|\bever\b|\bused\s+to\b|\bwhat\s+happened\b|什么时候|何时|之前|以前|历史|变更|改过|还(在)?用)");
+re!(
+    history_re,
+    r"(?i)(\bwhen\b|\bbefore\b|\bhistory\b|\bchanged?\b|\bstill\b|\bever\b|\bused\s+to\b|\bwhat\s+happened\b|什么时候|何时|之前|以前|历史|变更|改过|还(在)?用)"
+);
 /// The query asks about history or change over time.
 pub fn asks_history(s: &str) -> bool {
     history_re().is_match(s)
@@ -741,11 +965,7 @@ pub fn kind_prior(s: &str) -> &'static str {
 }
 
 pub fn extract_entities(s: &str) -> Vec<String> {
-    let mut v: Vec<String> = entity_re()
-        .find_iter(s)
-        .map(|m| m.as_str().trim_matches('`').to_string())
-        .filter(|e| e.len() >= 3)
-        .collect();
+    let mut v: Vec<String> = entity_re().find_iter(s).map(|m| m.as_str().trim_matches('`').to_string()).filter(|e| e.len() >= 3).collect();
     v.sort();
     v.dedup();
     v.truncate(12);
@@ -768,12 +988,15 @@ pub const KINDS: &[(&str, &str)] = &[
 // ---------------------------------------------------------------- v0.4 gateway signals
 
 // Authorization / approval language aimed at whoever acts on the note: on the passive path this is never injected.
-re!(agent_authz_re, r"(?ix)(
+re!(
+    agent_authz_re,
+    r"(?ix)(
     \bauto-?approv | \b(doesn'?t|does\s+not|don'?t|do\s+not|no)\s+need\s+to\s+(be\s+)?(asked|ask|check|confirm|consult)
   | \bno\s+need\s+to\s+(ask|check|confirm|consult)\b | \bwithout\s+(asking|confirmation|confirming|approval|review)\b
   | \b(skip|bypass)\s+(the\s+)?(review|approval|confirmation)s?\b | \bpre-?approv | \bstraight\s+away\b[^.\n]{0,40}\bapply\b
   | (不需要|无需|不用|不必)(再)?(向用户|跟用户|和用户)?(询问|确认|征求|请示|同意|审批) | 自动(批准|确认|同意)
-)");
+)"
+);
 
 /// Text that addresses an AI agent or grants it authorization (stricter than the write-time injection screen; used
 /// to keep such notes off the passive injection path).
@@ -819,12 +1042,15 @@ pub fn redact_secrets(s: &str) -> String {
     t.lines().map(|l| if has_secret(l) { REDACTED } else { l }).collect::<Vec<_>>().join("\n")
 }
 
-re!(error_line_re, r"(?ix)(
+re!(
+    error_line_re,
+    r"(?ix)(
     \berror\b | \berr!? | \bfailed\b | \bfailure\b | \bfail(s|ing)?\b | \bpanic(ked)?\b | \btraceback\b | \bexception\b
   | \bexit\s+(code|status)\s*[:=]?\s*[1-9] | \bE\d{4}\b | ✗ | \bnot\s+found\b | \bpermission\s+denied\b | \bdenied\b
   | \btimed?\s*out\b | \bsegmentation\s+fault\b | \bundefined\s+reference\b | \bcannot\b | \bcan'?t\s+(find|open|connect)
   | \bnack\b | \brefused\b | \bunauthori[sz]ed\b | \bfatal\b | 报错 | 错误 | 失败
-)");
+)"
+);
 re!(polite_no_re, r"(?i)^\s*no\s+(problem|worries|thanks|rush|need)\b");
 re!(benign_err_re, r"(?i)\b0\s+(failed|errors?)\b|\b(failed|errors?)\s*[:=]\s*0\b");
 re!(path_re, r"(?:[\w.\-]+/)+[\w.\-]+|\b[\w\-]+\.(?:rs|py|ts|tsx|js|go|toml|json|ya?ml|sh|c|h|cpp|java|rb|kt|swift)\b");
@@ -864,8 +1090,14 @@ pub fn paths_in(s: &str) -> Vec<String> {
     v
 }
 
-re!(correction_start_re, r"(?ix)^\s*(no[,.!:\s]|nope\b|wrong\b|actually[,:]|not\s+like\s+that|that'?s\s+not\s+(it|right|what)|stop\b|instead[,:]|不对|不是|错了|别|不要)");
-re!(correction_any_re, r"(?ix)(\bthat'?s\s+(wrong|incorrect|not\s+right)\b|\byou'?re\s+wrong\b|\bdon'?t\s+use\b|\bdo\s+not\s+use\b|\bstop\s+using\b|\bi\s+told\s+you\b|\bwe\s+don'?t\s+do\s+that\b|\bnever\s+use\b|不对|不是这样|别用|不要用|错了|搞错了|说过了|应该用|改成)");
+re!(
+    correction_start_re,
+    r"(?ix)^\s*(no[,.!:\s]|nope\b|wrong\b|actually[,:]|not\s+like\s+that|that'?s\s+not\s+(it|right|what)|stop\b|instead[,:]|不对|不是|错了|别|不要)"
+);
+re!(
+    correction_any_re,
+    r"(?ix)(\bthat'?s\s+(wrong|incorrect|not\s+right)\b|\byou'?re\s+wrong\b|\bdon'?t\s+use\b|\bdo\s+not\s+use\b|\bstop\s+using\b|\bi\s+told\s+you\b|\bwe\s+don'?t\s+do\s+that\b|\bnever\s+use\b|不对|不是这样|别用|不要用|错了|搞错了|说过了|应该用|改成)"
+);
 
 /// The user corrects the agent ("no, …", "that's wrong", "don't use X", "不对", "别用 …").
 pub fn is_correction(s: &str) -> bool {

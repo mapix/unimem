@@ -159,7 +159,9 @@ async fn models_download(cfg: &Config, name: &str, dir: Option<PathBuf>) -> Resu
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(1800)).build()?;
     for (file, sha) in spec.files {
         let path = dir.join(file);
-        let ok = |p: &std::path::Path| -> bool { sha.is_empty() || std::fs::read(p).map(|b| format!("{:x}", sha2::Sha256::digest(&b)) == *sha).unwrap_or(false) };
+        let ok = |p: &std::path::Path| -> bool {
+            sha.is_empty() || std::fs::read(p).map(|b| format!("{:x}", sha2::Sha256::digest(&b)) == *sha).unwrap_or(false)
+        };
         if path.exists() && ok(&path) {
             println!("ok        {}", path.display());
             continue;
@@ -324,7 +326,15 @@ fn print_mem(e: &Engine, m: &Memory) {
     if m.superseded_by.is_some() {
         flags.push_str(" · superseded");
     }
-    println!("{}  {}  [{} · {}{}]  via {}", m.id, fmt_date(m.created_at), scope_label(e, &m.scope), m.kind, flags, if m.source.harness.is_empty() { "?" } else { &m.source.harness });
+    println!(
+        "{}  {}  [{} · {}{}]  via {}",
+        m.id,
+        fmt_date(m.created_at),
+        scope_label(e, &m.scope),
+        m.kind,
+        flags,
+        if m.source.harness.is_empty() { "?" } else { &m.source.harness }
+    );
     println!("    {}", m.content);
     if let Some(w) = &m.why {
         println!("    because: {w}");
@@ -377,7 +387,13 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
             let scopes: Vec<String> = out.scopes.iter().map(|s| scope_label(&e, s)).collect();
-            println!("searched: {}  ·  mode {}  ·  decided by {}  ·  sufficient: {}", scopes.join(", "), out.mode, if out.decided_by.is_empty() { "-" } else { &out.decided_by }, out.sufficient);
+            println!(
+                "searched: {}  ·  mode {}  ·  decided by {}  ·  sufficient: {}",
+                scopes.join(", "),
+                out.mode,
+                if out.decided_by.is_empty() { "-" } else { &out.decided_by },
+                out.sufficient
+            );
             if out.notes.is_empty() {
                 println!("(no matching memories)");
             }
@@ -408,7 +424,9 @@ async fn main() -> Result<()> {
                 Some(s) if s.starts_with("project:") => Some(vec![s.to_string()]),
                 Some(name) => {
                     let n = name.to_lowercase();
-                    match e.store.list_projects().into_iter().find(|p| p.pid.to_lowercase() == n || p.name.to_lowercase() == n || p.aliases.iter().any(|a| a.to_lowercase() == n)) {
+                    match e.store.list_projects().into_iter().find(|p| {
+                        p.pid.to_lowercase() == n || p.name.to_lowercase() == n || p.aliases.iter().any(|a| a.to_lowercase() == n)
+                    }) {
                         Some(p) => Some(vec![scope_of(&p.pid)]),
                         None => anyhow::bail!("unknown scope / project '{name}'"),
                     }
@@ -466,7 +484,11 @@ async fn main() -> Result<()> {
                     }
                     println!("stack:    {}", p.stack);
                     println!("aliases:  {}", p.aliases.join(", "));
-                    println!("summary:  {}{}", if p.summary.is_empty() { "(none)" } else { &p.summary }, if p.summary_by.is_empty() { String::new() } else { format!("  [by {}]", p.summary_by) });
+                    println!(
+                        "summary:  {}{}",
+                        if p.summary.is_empty() { "(none)" } else { &p.summary },
+                        if p.summary_by.is_empty() { String::new() } else { format!("  [by {}]", p.summary_by) }
+                    );
                     println!("memories: {}", e.store.count_memories().get(&scope_of(&p.pid)).copied().unwrap_or(0));
                 }
                 None => println!("no project detected for {}", ctx.cwd.unwrap_or_default()),
@@ -495,7 +517,16 @@ async fn main() -> Result<()> {
             println!("episodes:  {episodes}");
             println!("decider:   {}", e.decider.describe());
             println!("embedder:  {}", e.embedder.id());
-            println!("distill:   {}", if !cfg.distill.enabled { "off".to_string() } else if cfg.distill.model.is_empty() { "heuristic".into() } else { cfg.distill.model.clone() });
+            println!(
+                "distill:   {}",
+                if !cfg.distill.enabled {
+                    "off".to_string()
+                } else if cfg.distill.model.is_empty() {
+                    "heuristic".into()
+                } else {
+                    cfg.distill.model.clone()
+                }
+            );
             Ok(())
         }
         Cmd::Trace { n } => {
@@ -515,7 +546,10 @@ async fn main() -> Result<()> {
             ModelsCmd::Download { name, dir } => models_download(&cfg, &name, dir).await,
             ModelsCmd::List => {
                 let d = cfg.data_dir().join("models").join(unimem::embed::E5_SMALL.dir);
-                println!("e5-small  intfloat/multilingual-e5-small (118M, 384-d, multilingual)  {}", if d.join("model.onnx").exists() { format!("installed: {}", d.display()) } else { "not installed".into() });
+                println!(
+                    "e5-small  intfloat/multilingual-e5-small (118M, 384-d, multilingual)  {}",
+                    if d.join("model.onnx").exists() { format!("installed: {}", d.display()) } else { "not installed".into() }
+                );
                 println!("onnx feature in this build: {}", cfg!(feature = "onnx"));
                 Ok(())
             }
@@ -529,7 +563,10 @@ async fn main() -> Result<()> {
         Cmd::Distill { now } => {
             let e = open(&cfg)?;
             if !cfg.distill.enabled && (cfg.distill.base_url.is_empty() || cfg.distill.model.is_empty()) {
-                println!("distiller not configured: set [distill] enabled = true (heuristic) or base_url + model in {}", cli.config.unwrap_or_else(Config::default_path).display());
+                println!(
+                    "distiller not configured: set [distill] enabled = true (heuristic) or base_url + model in {}",
+                    cli.config.unwrap_or_else(Config::default_path).display()
+                );
                 return Ok(());
             }
             let n = if now { unimem::distill::run_with_idle(&e, 0).await? } else { unimem::distill::run_once(&e).await? };
@@ -552,14 +589,25 @@ async fn main() -> Result<()> {
         },
         Cmd::Ui { no_open } => {
             let url = format!("http://{}/ui", cfg.listen);
-            let up = tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(&cfg.listen)).await.is_ok_and(|r| r.is_ok());
+            let up =
+                tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(&cfg.listen)).await.is_ok_and(|r| r.is_ok());
             println!("{url}");
             if !up {
                 eprintln!("(the gateway is not running on {}; start it with `unimem serve`)", cfg.listen);
             }
             if !no_open {
-                let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
-                let _ = std::process::Command::new(opener).arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+                let opener = if cfg!(target_os = "macos") {
+                    "open"
+                } else if cfg!(windows) {
+                    "explorer"
+                } else {
+                    "xdg-open"
+                };
+                let _ = std::process::Command::new(opener)
+                    .arg(&url)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
             }
             Ok(())
         }
@@ -576,7 +624,9 @@ async fn main() -> Result<()> {
 
 async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("unimem=info")))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("unimem=info")),
+        )
         .init();
     if let Some(l) = listen {
         cfg.listen = l;
@@ -616,7 +666,16 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
     println!("  db:       {}", cfg.db_path().display());
     println!("  decider:  {}", engine.decider.describe());
     println!("  embedder: {}", engine.embedder.id());
-    println!("  distill:  {}", if !cfg.distill.enabled { "off".to_string() } else if cfg.distill.model.is_empty() { "heuristic".into() } else { cfg.distill.model.clone() });
+    println!(
+        "  distill:  {}",
+        if !cfg.distill.enabled {
+            "off".to_string()
+        } else if cfg.distill.model.is_empty() {
+            "heuristic".into()
+        } else {
+            cfg.distill.model.clone()
+        }
+    );
     println!("  inject:   {}", if cfg.inject.enabled { "on" } else { "off (pass-through)" });
     println!("setup:");
     println!("  Claude Code:  export ANTHROPIC_BASE_URL=http://{addr}");

@@ -55,7 +55,9 @@ async fn mock_handler(State(m): State<Arc<Mock>>, req: Request) -> Response {
     let reply = m.script.lock().pop_front().unwrap_or_else(|| Reply::Json(resp_obj("resp_default", vec![msg_item("msg_d", "ok")], 1, 1)));
     match reply {
         Reply::Json(v) => Response::builder().header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
-        Reply::Status(s, v) => Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+        Reply::Status(s, v) => {
+            Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap()
+        }
         Reply::Sse(evs) => {
             let mut s = String::new();
             for e in evs {
@@ -86,7 +88,12 @@ async fn env(script: Vec<Reply>) -> Env {
     let up = serve(Router::new().route("/v1/responses", post(mock_handler)).with_state(mock.clone())).await;
     let mut cfg = Config::default();
     cfg.upstream.openai = up;
-    let engine = Arc::new(Engine::with_parts(cfg, Store::open_memory().unwrap(), Box::new(HashEmbedder { dim: 512 }), ChainDecider::new(vec![Box::new(HeuristicDecider)])));
+    let engine = Arc::new(Engine::with_parts(
+        cfg,
+        Store::open_memory().unwrap(),
+        Box::new(HashEmbedder { dim: 512 }),
+        ChainDecider::new(vec![Box::new(HeuristicDecider)]),
+    ));
     let state = Arc::new(AppState { engine: engine.clone(), client: reqwest::Client::new() });
     let gw = serve(gateway::router(state)).await;
     Env { mock, gw, engine, client: reqwest::Client::new() }
@@ -245,7 +252,16 @@ fn tool_names(body: &Value) -> Vec<String> {
 async fn stream_intercepts_merges_and_expands_next_request() {
     let remember = json!({"content": "We deploy the alpha service through ops/deploy.sh, never by hand", "kind": "procedure"});
     let e = env(vec![
-        sse_script("resp_1", vec![reasoning_item("rs_1", "ENC-1"), msg_item("msg_1", "Let me save that."), call_item("fc_1", "call_mem1", "unimem_remember", &remember)], 100, 30),
+        sse_script(
+            "resp_1",
+            vec![
+                reasoning_item("rs_1", "ENC-1"),
+                msg_item("msg_1", "Let me save that."),
+                call_item("fc_1", "call_mem1", "unimem_remember", &remember),
+            ],
+            100,
+            30,
+        ),
         sse_script("resp_2", vec![msg_item("msg_2", "Saved it.")], 140, 7),
         Reply::Json(resp_obj("resp_3", vec![msg_item("msg_3", "ok")], 5, 1)),
     ])
@@ -331,7 +347,12 @@ async fn stream_intercepts_merges_and_expands_next_request() {
 #[tokio::test]
 async fn non_stream_merges_rounds_and_sums_usage() {
     let e = env(vec![
-        Reply::Json(resp_obj("resp_a", vec![msg_item("m1", "Checking memory."), call_item("fc_r", "call_r1", "unimem_recall", &json!({"query":"deploy"}))], 100, 10)),
+        Reply::Json(resp_obj(
+            "resp_a",
+            vec![msg_item("m1", "Checking memory."), call_item("fc_r", "call_r1", "unimem_recall", &json!({"query":"deploy"}))],
+            100,
+            10,
+        )),
         Reply::Json(resp_obj("resp_b", vec![msg_item("m2", "Nothing recorded.")], 120, 7)),
         Reply::Json(resp_obj("resp_c", vec![msg_item("m3", "ok")], 1, 1)),
     ])
@@ -372,7 +393,11 @@ async fn mixed_turn_hands_harness_calls_and_replays_hidden_items() {
     let e = env(vec![
         sse_script(
             "resp_m",
-            vec![msg_item("m1", "Looking."), call_item("fc_mem", "call_mem", "unimem_recall", &json!({"query":"tests"})), call_item("fc_sh", "call_sh", "shell", &shell_args)],
+            vec![
+                msg_item("m1", "Looking."),
+                call_item("fc_mem", "call_mem", "unimem_recall", &json!({"query":"tests"})),
+                call_item("fc_sh", "call_sh", "shell", &shell_args),
+            ],
             50,
             20,
         ),
@@ -387,7 +412,8 @@ async fn mixed_turn_hands_harness_calls_and_replays_hidden_items() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[1]["name"], "shell");
     assert_eq!(items[1]["arguments"], shell_args.to_string());
-    let args_deltas: Vec<u64> = s.of("response.function_call_arguments.delta").iter().map(|v| v["output_index"].as_u64().unwrap()).collect();
+    let args_deltas: Vec<u64> =
+        s.of("response.function_call_arguments.delta").iter().map(|v| v["output_index"].as_u64().unwrap()).collect();
     assert_eq!(args_deltas, vec![1, 1]);
     assert_eq!(s.completed()["usage"]["output_tokens"], 20);
     assert_eq!(e.seen().len(), 1, "no continuation on mixed turns");
@@ -398,8 +424,19 @@ async fn mixed_turn_hands_harness_calls_and_replays_hidden_items() {
     input.push(harness_out.clone());
     let _ = e.post(&agent_req(Value::Array(input), true)).await.bytes().await;
     let in2 = e.seen()[1].body()["input"].as_array().unwrap().clone();
-    let shape: Vec<String> = in2.iter().map(|i| format!("{}:{}", i["type"].as_str().unwrap(), i["call_id"].as_str().unwrap_or(""))).collect();
-    assert_eq!(shape, vec!["message:", "message:", "function_call:call_sh", "function_call:call_mem", "function_call_output:call_mem", "function_call_output:call_sh"]);
+    let shape: Vec<String> =
+        in2.iter().map(|i| format!("{}:{}", i["type"].as_str().unwrap(), i["call_id"].as_str().unwrap_or(""))).collect();
+    assert_eq!(
+        shape,
+        vec![
+            "message:",
+            "message:",
+            "function_call:call_sh",
+            "function_call:call_mem",
+            "function_call_output:call_mem",
+            "function_call_output:call_sh"
+        ]
+    );
     assert_eq!(in2[3]["arguments"], json!({"query":"tests"}).to_string());
     assert_eq!(in2[5], harness_out);
 }
@@ -408,7 +445,15 @@ async fn mixed_turn_hands_harness_calls_and_replays_hidden_items() {
 async fn requests_without_tools_pass_through_byte_identical() {
     let e = env(vec![Reply::Json(resp_obj("r", vec![msg_item("m", "Title")], 1, 1))]).await;
     let raw = r#"{"model":"gpt-x",  "input":"title for: fix bug","instructions":"be brief"}"#;
-    let r = e.client.post(format!("{}/v1/responses", e.gw)).header("authorization", "Bearer k").header("content-type", "application/json").body(raw).send().await.unwrap();
+    let r = e
+        .client
+        .post(format!("{}/v1/responses", e.gw))
+        .header("authorization", "Bearer k")
+        .header("content-type", "application/json")
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
     assert!(r.status().is_success());
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["output"][0]["content"][0]["text"], "Title");
@@ -422,7 +467,15 @@ async fn compressed_bodies_are_decoded_and_forwarded_plain() {
     let e = env(vec![Reply::Json(resp_obj("r", vec![msg_item("m", "hi")], 1, 1))]).await;
     let body = agent_req(json!([user("hello there")]), false);
     let z = zstd::encode_all(&serde_json::to_vec(&body).unwrap()[..], 3).unwrap();
-    let r = e.client.post(format!("{}/v1/responses", e.gw)).header("content-encoding", "zstd").header("content-type", "application/json").body(z).send().await.unwrap();
+    let r = e
+        .client
+        .post(format!("{}/v1/responses", e.gw))
+        .header("content-encoding", "zstd")
+        .header("content-type", "application/json")
+        .body(z)
+        .send()
+        .await
+        .unwrap();
     assert!(r.status().is_success());
     let seen = e.seen();
     assert!(seen[0].headers.get("content-encoding").is_none());
@@ -444,7 +497,12 @@ async fn upstream_errors_are_relayed() {
 #[tokio::test]
 async fn continuation_error_ends_stream_cleanly() {
     let e = env(vec![
-        sse_script("resp_x", vec![msg_item("m1", "Looking it up."), call_item("fc_x", "call_x", "unimem_recall", &json!({"query":"q"}))], 10, 4),
+        sse_script(
+            "resp_x",
+            vec![msg_item("m1", "Looking it up."), call_item("fc_x", "call_x", "unimem_recall", &json!({"query":"q"}))],
+            10,
+            4,
+        ),
         Reply::Status(500, json!({"error":{"message":"boom"}})),
     ])
     .await;
@@ -459,7 +517,15 @@ async fn continuation_error_ends_stream_cleanly() {
 #[tokio::test]
 async fn store_with_previous_response_id_does_not_replay() {
     let e = env(vec![
-        Reply::Json(resp_obj("resp_s1", vec![msg_item("m1", "Saving."), call_item("fc_s", "call_s", "unimem_remember", &json!({"content":"The CI runs on Buildkite, not GitHub Actions"}))], 10, 2)),
+        Reply::Json(resp_obj(
+            "resp_s1",
+            vec![
+                msg_item("m1", "Saving."),
+                call_item("fc_s", "call_s", "unimem_remember", &json!({"content":"The CI runs on Buildkite, not GitHub Actions"})),
+            ],
+            10,
+            2,
+        )),
         Reply::Json(resp_obj("resp_s2", vec![msg_item("m2", "Saved.")], 12, 3)),
     ])
     .await;

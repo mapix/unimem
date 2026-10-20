@@ -11,7 +11,12 @@ use unimem::screen;
 use unimem::store::Store;
 
 fn engine() -> Engine {
-    Engine::with_parts(Config::default(), Store::open_memory().unwrap(), Box::new(HashEmbedder { dim: 512 }), ChainDecider::new(vec![Box::new(HeuristicDecider)]))
+    Engine::with_parts(
+        Config::default(),
+        Store::open_memory().unwrap(),
+        Box::new(HashEmbedder { dim: 512 }),
+        ChainDecider::new(vec![Box::new(HeuristicDecider)]),
+    )
 }
 
 fn git_project(dir: &std::path::Path, name: &str) -> String {
@@ -95,7 +100,13 @@ async fn reason_note_is_linked_not_superseding() {
     let d = tempfile::tempdir().unwrap();
     let ctx = e.ctx_for("codex", "s1", Some(&git_project(d.path(), "heron")));
     let (fact, _, _) = stored(&e, &ctx, "heron stores session state in Redis instead of Postgres").await;
-    let r = e.write(&e.ctx_for("claude-code", "s2", ctx.cwd.as_deref()), w("Session state left Postgres because row locks on the sessions table stalled checkout under load")).await.unwrap();
+    let r = e
+        .write(
+            &e.ctx_for("claude-code", "s2", ctx.cwd.as_deref()),
+            w("Session state left Postgres because row locks on the sessions table stalled checkout under load"),
+        )
+        .await
+        .unwrap();
     let WriteOutcome::Stored { links, superseded, .. } = r else { panic!("{r:?}") };
     assert!(superseded.is_empty(), "a reason must not supersede the fact it explains: {superseded:?}");
     assert!(links.iter().any(|(rel, id)| rel == "causal" && *id == fact), "{links:?}");
@@ -117,7 +128,8 @@ async fn templated_notes_about_different_things_are_not_duplicates() {
     stored(&e, &ctx, "I prefer Postgres over MySQL for event work").await;
     // a true paraphrase is still a duplicate
     stored(&e, &ctx, "The plover importer retries failed rows three times, then writes them to dead_letter.csv").await;
-    let r = e.write(&ctx, w("Failed rows in the plover importer are retried three times and then written to dead_letter.csv")).await.unwrap();
+    let r =
+        e.write(&ctx, w("Failed rows in the plover importer are retried three times and then written to dead_letter.csv")).await.unwrap();
     assert!(matches!(r, WriteOutcome::Duplicate { .. }), "{r:?}");
 }
 
@@ -193,10 +205,18 @@ fn secret_screen_entropy_and_references() {
 
 #[test]
 fn status_rot_is_plan_and_progress_language_only() {
-    for s in ["I'm halfway through the parser rewrite, don't merge until I'm back.", "Currently debugging the flaky upload test, ignore the red CI.", "我这会儿正在改支付回调，先别合并。"] {
+    for s in [
+        "I'm halfway through the parser rewrite, don't merge until I'm back.",
+        "Currently debugging the flaky upload test, ignore the red CI.",
+        "我这会儿正在改支付回调，先别合并。",
+    ] {
         assert!(screen::durable_prior(s) < 0.4, "{s}");
     }
-    for s in ["Branches named tmp/* are deleted after a week by the cleanup job.", "The importer is currently on version 3 of the schema", "正在使用的 Python 版本是 3.12"] {
+    for s in [
+        "Branches named tmp/* are deleted after a week by the cleanup job.",
+        "The importer is currently on version 3 of the schema",
+        "正在使用的 Python 版本是 3.12",
+    ] {
         assert!(screen::durable_prior(s) > 0.4, "{s}");
     }
 }

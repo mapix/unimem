@@ -34,7 +34,9 @@ pub type Shared = Arc<AppState>;
 
 /// Wrap a listener so every accepted socket gets `TCP_NODELAY`. The SSE rewriter emits many small frames;
 /// with Nagle + delayed ACK each one can stall ~40 ms on loopback.
-pub fn nodelay_listener(listener: tokio::net::TcpListener) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = std::net::SocketAddr> {
+pub fn nodelay_listener(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = std::net::SocketAddr> {
     use axum::serve::ListenerExt;
     listener.tap_io(|tcp| {
         if let Err(e) = tcp.set_nodelay(true) {
@@ -150,7 +152,19 @@ pub fn session_from_metadata(meta: &Value) -> Option<String> {
 
 // ---------------------------------------------------------------- upstream plumbing
 
-const HOP: &[&str] = &["host", "content-length", "connection", "keep-alive", "transfer-encoding", "upgrade", "te", "trailer", "proxy-connection", "accept-encoding", "content-encoding"];
+const HOP: &[&str] = &[
+    "host",
+    "content-length",
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "te",
+    "trailer",
+    "proxy-connection",
+    "accept-encoding",
+    "content-encoding",
+];
 
 pub fn forward_headers(h: &HeaderMap) -> reqwest::header::HeaderMap {
     let mut out = reqwest::header::HeaderMap::new();
@@ -207,7 +221,8 @@ pub fn join_url(base: &str, path: &str, query: Option<&str>) -> String {
 }
 
 pub async fn send_json(st: &AppState, url: &str, headers: &reqwest::header::HeaderMap, body: &Value) -> reqwest::Result<reqwest::Response> {
-    let r = st.client
+    let r = st
+        .client
         .post(url)
         .headers(headers.clone())
         .header("content-type", "application/json")
@@ -220,7 +235,11 @@ pub async fn send_json(st: &AppState, url: &str, headers: &reqwest::header::Head
 }
 
 pub fn upstream_error(e: impl std::fmt::Display) -> Response {
-    (StatusCode::BAD_GATEWAY, Json(json!({"type": "error", "error": {"type": "api_error", "message": format!("unimem: upstream unreachable: {e}")}}))).into_response()
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(json!({"type": "error", "error": {"type": "api_error", "message": format!("unimem: upstream unreachable: {e}")}})),
+    )
+        .into_response()
 }
 
 /// Pass an upstream response through unchanged (status, headers, streamed body).
@@ -248,7 +267,8 @@ pub fn sse_response(status: u16, upstream_headers: &reqwest::header::HeaderMap, 
 async fn passthrough(State(st): State<Shared>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let path = parts.uri.path().to_string();
-    let anthropicish = parts.headers.contains_key("anthropic-version") || parts.headers.contains_key("x-api-key") || path.starts_with("/v1/messages");
+    let anthropicish =
+        parts.headers.contains_key("anthropic-version") || parts.headers.contains_key("x-api-key") || path.starts_with("/v1/messages");
     let base = if path.starts_with("/backend-api/") {
         st.engine.cfg.upstream.chatgpt.trim_end_matches("/backend-api/codex").trim_end_matches("/codex").to_string()
     } else if anthropicish {
@@ -301,7 +321,10 @@ pub async fn build_augmentation(st: &AppState, ctx: &Ctx, prompt: &str) -> Optio
     }
     if cfg.recall {
         let budget = std::time::Duration::from_millis(cfg.recall_budget_ms);
-        let fut = st.engine.recall(ctx, RecallReq { query: truncate_chars(prompt, 2000), project: None, k: cfg.max_recall_notes, passive: true, ..Default::default() });
+        let fut = st.engine.recall(
+            ctx,
+            RecallReq { query: truncate_chars(prompt, 2000), project: None, k: cfg.max_recall_notes, passive: true, ..Default::default() },
+        );
         match tokio::time::timeout(budget, fut).await {
             Ok(Ok(out)) if !out.notes.is_empty() => {
                 parts.push(format!(
@@ -411,11 +434,7 @@ async fn api_recall(State(st): State<Shared>, headers: HeaderMap, Json(v): Json<
                 k: v["k"].as_u64().unwrap_or(5) as usize,
                 passive: v["passive"].as_bool().unwrap_or(false),
                 // `"depth": "top_k"` returns the ranked top-k instead of the adaptive cut-off
-                depth: if v["depth"].as_str() == Some("top_k") {
-                    crate::engine::Depth::TopK
-                } else {
-                    crate::engine::Depth::Adaptive
-                },
+                depth: if v["depth"].as_str() == Some("top_k") { crate::engine::Depth::TopK } else { crate::engine::Depth::Adaptive },
             },
         )
         .await

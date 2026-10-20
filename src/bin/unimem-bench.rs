@@ -272,7 +272,8 @@ struct Dataset {
 }
 
 fn load_ds(p: &Path) -> Result<Dataset> {
-    serde_json::from_str(&std::fs::read_to_string(p).with_context(|| p.display().to_string())?).with_context(|| format!("parsing {}", p.display()))
+    serde_json::from_str(&std::fs::read_to_string(p).with_context(|| p.display().to_string())?)
+        .with_context(|| format!("parsing {}", p.display()))
 }
 
 struct Corpus {
@@ -294,7 +295,11 @@ impl Corpus {
         Ok(Self { dirs, home })
     }
     fn cwd(&self, at: &str) -> String {
-        if at == "home" { self.home.display().to_string() } else { self.dirs[at].display().to_string() }
+        if at == "home" {
+            self.home.display().to_string()
+        } else {
+            self.dirs[at].display().to_string()
+        }
     }
 }
 
@@ -586,7 +591,14 @@ async fn e1(data: &Path) -> Result<Value> {
     let tmp = TempDir::new("e1")?;
     let corpus = Corpus::build(&tmp.0.join("ws"), &ds)?;
     let ev = Ev { ds: &ds, by_id: ds.notes.iter().map(|n| (n.id.as_str(), n)).collect() };
-    println!("[e1] {} projects, {} notes, {} queries; decider={} embedder={}", ds.projects.len(), ds.notes.len(), ds.queries.len(), config_info(&cfg)["decider"], config_info(&cfg)["embedder"]);
+    println!(
+        "[e1] {} projects, {} notes, {} queries; decider={} embedder={}",
+        ds.projects.len(),
+        ds.notes.len(),
+        ds.queries.len(),
+        config_info(&cfg)["decider"],
+        config_info(&cfg)["embedder"]
+    );
 
     // ---- unified unimem
     let full_db = tmp.0.join("full.db");
@@ -623,7 +635,8 @@ async fn e1(data: &Path) -> Result<Value> {
 
     // ---- per-harness silos
     let mut silos: HashMap<String, (Engine, HashMap<String, String>)> = HashMap::new();
-    let harnesses: std::collections::BTreeSet<&str> = ds.notes.iter().map(|n| n.harness.as_str()).chain(ds.queries.iter().map(|q| q.harness.as_str())).collect();
+    let harnesses: std::collections::BTreeSet<&str> =
+        ds.notes.iter().map(|n| n.harness.as_str()).chain(ds.queries.iter().map(|q| q.harness.as_str())).collect();
     for h in harnesses {
         let e = make_engine(&cfg, Store::open_memory()?);
         let notes: Vec<&DNote> = ds.notes.iter().filter(|n| n.harness == h).collect();
@@ -632,12 +645,26 @@ async fn e1(data: &Path) -> Result<Value> {
     }
 
     // ---- baselines: store every write verbatim (no screening, no dedupe, no supersede)
-    let docs: Vec<BDoc> = ds.notes.iter().map(|n| BDoc { id: n.id.clone(), at: n.at.clone(), text: format!("{} {}", n.content, n.why.clone().unwrap_or_default()) }).collect();
+    let docs: Vec<BDoc> = ds
+        .notes
+        .iter()
+        .map(|n| BDoc { id: n.id.clone(), at: n.at.clone(), text: format!("{} {}", n.content, n.why.clone().unwrap_or_default()) })
+        .collect();
     let embs = full.embedder.embed(&docs.iter().map(|d| d.text.clone()).collect::<Vec<_>>()).await?;
     let bm = Bm25::new(&docs);
 
     let mut results: BTreeMap<String, Vec<SysOut>> = BTreeMap::new();
-    let names = ["unimem-full", "unimem-top5", "unimem-lite", "unimem-passive", "silo-per-harness", "vector-top5", "vector-top5-cwd", "bm25-top5", "bm25-top5-cwd"];
+    let names = [
+        "unimem-full",
+        "unimem-top5",
+        "unimem-lite",
+        "unimem-passive",
+        "silo-per-harness",
+        "vector-top5",
+        "vector-top5-cwd",
+        "bm25-top5",
+        "bm25-top5-cwd",
+    ];
     for n in names {
         results.insert(n.to_string(), vec![]);
     }
@@ -653,7 +680,8 @@ async fn e1(data: &Path) -> Result<Value> {
             let ctx = full.ctx_for(&q.harness, &format!("q-{}", q.id), Some(&corpus.cwd(&q.at)));
             let scopes = full.recall_scopes(&ctx, &q.q, None);
             let cands = full.candidates(&q.q, &scopes, 30).await?;
-            let rows: Vec<Value> = cands.iter().map(|c| json!({"y": log.m2n.get(&c.id).is_some_and(|n| q.gold.contains(n)) as u8, "ev": c.ev})).collect();
+            let rows: Vec<Value> =
+                cands.iter().map(|c| json!({"y": log.m2n.get(&c.id).is_some_and(|n| q.gold.contains(n)) as u8, "ev": c.ev})).collect();
             writeln!(f, "{}", json!({"qid": q.id, "cat": q.cat, "n_gold": q.gold.len(), "cands": rows}))?;
         }
         results.get_mut("unimem-full").unwrap().push(run_uni(&full, &log.m2n, &corpus, q, false).await?);
@@ -665,14 +693,23 @@ async fn e1(data: &Path) -> Result<Value> {
         for scoped in [false, true] {
             let t = Instant::now();
             let qe = full.embedder.embed_one(&q.q).await?;
-            let mut v: Vec<(usize, f32)> = docs.iter().enumerate().filter(|(_, d)| baseline_visible(d, q, scoped)).map(|(i, _)| (i, cosine(&qe, &embs[i]))).collect();
+            let mut v: Vec<(usize, f32)> =
+                docs.iter().enumerate().filter(|(_, d)| baseline_visible(d, q, scoped)).map(|(i, _)| (i, cosine(&qe, &embs[i]))).collect();
             v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            let o = SysOut { ids: v.iter().take(5).map(|x| docs[x.0].id.clone()).collect(), sufficient: true, ms: ms(t), ..Default::default() };
+            let o =
+                SysOut { ids: v.iter().take(5).map(|x| docs[x.0].id.clone()).collect(), sufficient: true, ms: ms(t), ..Default::default() };
             results.get_mut(if scoped { "vector-top5-cwd" } else { "vector-top5" }).unwrap().push(o);
             let t = Instant::now();
-            let mut v: Vec<(usize, f64)> = docs.iter().enumerate().filter(|(_, d)| baseline_visible(d, q, scoped)).map(|(i, _)| (i, bm.score(&q.q, i))).filter(|x| x.1 > 0.0).collect();
+            let mut v: Vec<(usize, f64)> = docs
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| baseline_visible(d, q, scoped))
+                .map(|(i, _)| (i, bm.score(&q.q, i)))
+                .filter(|x| x.1 > 0.0)
+                .collect();
             v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            let o = SysOut { ids: v.iter().take(5).map(|x| docs[x.0].id.clone()).collect(), sufficient: true, ms: ms(t), ..Default::default() };
+            let o =
+                SysOut { ids: v.iter().take(5).map(|x| docs[x.0].id.clone()).collect(), sufficient: true, ms: ms(t), ..Default::default() };
             results.get_mut(if scoped { "bm25-top5-cwd" } else { "bm25-top5" }).unwrap().push(o);
         }
     }
@@ -681,7 +718,14 @@ async fn e1(data: &Path) -> Result<Value> {
     let mut per_query: BTreeMap<String, serde_json::Map<String, Value>> = BTreeMap::new();
     for n in names {
         let (v, per) = evaluate(&ev, &results[n]);
-        println!("[e1] {n:18} R@1={} R@5={} MRR={} leak={} abstain={}", v["overall"]["recall@1"], v["overall"]["recall@5"], v["overall"]["mrr"], v["overall"]["scope_leak_rate"], v["overall"]["abstain_rate"]);
+        println!(
+            "[e1] {n:18} R@1={} R@5={} MRR={} leak={} abstain={}",
+            v["overall"]["recall@1"],
+            v["overall"]["recall@5"],
+            v["overall"]["mrr"],
+            v["overall"]["scope_leak_rate"],
+            v["overall"]["abstain_rate"]
+        );
         systems.insert(n.to_string(), v);
         for (q, p) in ds.queries.iter().zip(per) {
             per_query.entry(q.id.clone()).or_default().insert(n.to_string(), json!({"ret": p["ret"], "rr": p["rr"]}));
@@ -816,7 +860,11 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
             let got = scope2key.get(scope).cloned().unwrap_or(scope.clone());
             scope_n += 1;
             let group = if n.scope == "global" {
-                if n.at == "home" { "global note written at home" } else { "global note written inside a project" }
+                if n.at == "home" {
+                    "global note written at home"
+                } else {
+                    "global note written inside a project"
+                }
             } else if n.scope == n.at {
                 "project note written in that project"
             } else {
@@ -830,8 +878,20 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
             } else {
                 scope_errors.push(json!({"id": nid, "at": n.at, "gold": n.scope, "got": got, "content": n.content}));
             }
-            let gk = if n.scope == "global" { "global" } else if n.scope == n.at { "current" } else { "other" };
-            let pk = if got == "global" { "global" } else if got == n.at { "current" } else { "other" };
+            let gk = if n.scope == "global" {
+                "global"
+            } else if n.scope == n.at {
+                "current"
+            } else {
+                "other"
+            };
+            let pk = if got == "global" {
+                "global"
+            } else if got == n.at {
+                "current"
+            } else {
+                "other"
+            };
             *confusion.entry(format!("gold={gk} → got={pk}")).or_default() += 1;
             if *kind == n.kind {
                 kind_ok += 1;
@@ -847,7 +907,8 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
         if pred_pairs.contains(&(a.clone(), b.clone())) {
             ds_pair_hits.push(json!({"new": a, "superseded": b}));
         }
-        let by: Vec<&String> = pred_pairs.iter().filter(|(x, y)| y == b && !gold_pairs.contains(&(x.clone(), y.clone()))).map(|(x, _)| x).collect();
+        let by: Vec<&String> =
+            pred_pairs.iter().filter(|(x, y)| y == b && !gold_pairs.contains(&(x.clone(), y.clone()))).map(|(x, _)| x).collect();
         if !by.is_empty() {
             ds_target_hits.push(json!({"target": b, "wrongly_superseded_by": by}));
         }
@@ -855,7 +916,10 @@ fn write_screen(ev: &Ev, log: &WriteLog, scope2key: &HashMap<String, String>) ->
     let n_decoy: u32 = decoys.values().map(|v| v.1).sum();
     let n_decoy_rej: u32 = decoys.values().map(|v| v.0).sum();
     let tp_pairs = pred_pairs.intersection(&gold_pairs).count() as f64;
-    let wrong_pairs: Vec<Value> = pred_pairs.difference(&gold_pairs).map(|(a, b)| json!({"new": a, "superseded": b, "new_label": ev.by_id[a.as_str()].label})).collect();
+    let wrong_pairs: Vec<Value> = pred_pairs
+        .difference(&gold_pairs)
+        .map(|(a, b)| json!({"new": a, "superseded": b, "new_label": ev.by_id[a.as_str()].label}))
+        .collect();
     let div = |a: f64, b: f64| if b > 0.0 { json!(r3(a / b)) } else { Value::Null };
     let n_dup_gold = (d_tp_loose + d_fn) as f64;
     let n_dup_gold_i = d_tp_loose + d_fn;
@@ -916,9 +980,14 @@ fn mock_content(v: &Value, n: u64) -> (Vec<Value>, &'static str) {
     let results: Vec<&Value> = blocks.iter().filter(|b| b["type"] == "tool_result").collect();
     if !results.is_empty() {
         let bash = results.iter().any(|b| b["tool_use_id"].as_str().is_some_and(|s| s.starts_with("toolu_bash")));
-        let fixed = msgs.iter().any(|m| blocks_of(&m["content"]).iter().any(|b| b["text"].as_str().is_some_and(|t| t.contains("[[fixed]]"))));
+        let fixed =
+            msgs.iter().any(|m| blocks_of(&m["content"]).iter().any(|b| b["text"].as_str().is_some_and(|t| t.contains("[[fixed]]"))));
         let uniq = if fixed { String::new() } else { format!(" (r{n})") };
-        let t = if bash { format!("The test run finished: 42 passed, 0 failed{uniq}. {FILLER}") } else { format!("Memory says deploys go through ops/deploy.sh; proceeding with that{uniq}. {FILLER}") };
+        let t = if bash {
+            format!("The test run finished: 42 passed, 0 failed{uniq}. {FILLER}")
+        } else {
+            format!("Memory says deploys go through ops/deploy.sh; proceeding with that{uniq}. {FILLER}")
+        };
         return (vec![text(&t)], "end_turn");
     }
     let prompt: String = blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n");
@@ -926,7 +995,11 @@ fn mock_content(v: &Value, n: u64) -> (Vec<Value>, &'static str) {
     let tag = &hash_hex(&[first_line])[..8];
     let bash = tool_use(&format!("toolu_bash{n}"), "Bash", json!({"command": "cargo test"}));
     let rec = tool_use(&format!("toolu_um{n}"), "unimem_recall", json!({"query": "how do we deploy and run the integration tests"}));
-    let rem = tool_use(&format!("toolu_um{n}"), "unimem_remember", json!({"content": format!("ledger-api integration tests need `docker compose up -d db` before `uv run pytest -m slow` (bench note {n})")}));
+    let rem = tool_use(
+        &format!("toolu_um{n}"),
+        "unimem_remember",
+        json!({"content": format!("ledger-api integration tests need `docker compose up -d db` before `uv run pytest -m slow` (bench note {n})")}),
+    );
     if ours && prompt.contains("[[mixed]]") {
         (vec![text("Let me check memory and run the tests."), rec, bash], "tool_use")
     } else if ours && prompt.contains("[[recall]]") {
@@ -951,7 +1024,9 @@ fn sse_events(id: &str, content: &[Value], stop: &str) -> Vec<Value> {
                 ev.push(json!({"type":"content_block_start","index":i,"content_block":{"type":"text","text":""}}));
                 let t: Vec<char> = b["text"].as_str().unwrap_or("").chars().collect();
                 for ch in t.chunks(48) {
-                    ev.push(json!({"type":"content_block_delta","index":i,"delta":{"type":"text_delta","text": ch.iter().collect::<String>()}}));
+                    ev.push(
+                        json!({"type":"content_block_delta","index":i,"delta":{"type":"text_delta","text": ch.iter().collect::<String>()}}),
+                    );
                 }
             }
             _ => {
@@ -975,8 +1050,10 @@ async fn mock_handler(State(m): State<Arc<Mock>>, body: Bytes) -> Response {
         m.seen.lock().push(v);
     }
     if stream {
-        let chunks: Vec<Result<Bytes, std::convert::Infallible>> =
-            sse_events(&format!("msg_{n}"), &content, stop).into_iter().map(|e| Ok(sse::encode_json(Some(e["type"].as_str().unwrap_or("")), &e))).collect();
+        let chunks: Vec<Result<Bytes, std::convert::Infallible>> = sse_events(&format!("msg_{n}"), &content, stop)
+            .into_iter()
+            .map(|e| Ok(sse::encode_json(Some(e["type"].as_str().unwrap_or("")), &e)))
+            .collect();
         Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(futures::stream::iter(chunks))).unwrap()
     } else {
         let msg = json!({"id": format!("msg_{n}"), "type":"message","role":"assistant","model":"claude-mock","content":content,"stop_reason":stop,"stop_sequence":null,"usage":{"input_tokens":1200,"output_tokens":60,"cache_read_input_tokens":1000}});
@@ -999,7 +1076,8 @@ fn cc_system(cwd: &str) -> Value {
 }
 
 fn cc_tools() -> Value {
-    let names = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite", "WebFetch", "WebSearch", "NotebookEdit", "ExitPlanMode"];
+    let names =
+        ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite", "WebFetch", "WebSearch", "NotebookEdit", "ExitPlanMode"];
     Value::Array(
         names
             .iter()
@@ -1062,7 +1140,12 @@ struct Visible {
 fn parse_visible(stream: bool, b: &[u8]) -> Visible {
     if !stream {
         let v: Value = serde_json::from_slice(b).unwrap_or(Value::Null);
-        return Visible { content: v["content"].as_array().cloned().unwrap_or_default(), stop: v["stop_reason"].as_str().unwrap_or("").into(), framing_ok: v["content"].is_array(), framing_err: String::new() };
+        return Visible {
+            content: v["content"].as_array().cloned().unwrap_or_default(),
+            stop: v["stop_reason"].as_str().unwrap_or("").into(),
+            framing_ok: v["content"].is_array(),
+            framing_err: String::new(),
+        };
     }
     let mut p = sse::Parser::default();
     let mut evs = p.push(b);
@@ -1195,7 +1278,14 @@ fn lcp(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
-async fn gateway_env(cfg: &Config, ds: &Dataset, corpus: &Corpus, db: &Path, upstream: &str, recall: bool) -> Result<(String, String, Arc<Engine>)> {
+async fn gateway_env(
+    cfg: &Config,
+    ds: &Dataset,
+    corpus: &Corpus,
+    db: &Path,
+    upstream: &str,
+    recall: bool,
+) -> Result<(String, String, Arc<Engine>)> {
     let mut c = cfg.clone();
     c.upstream.anthropic = upstream.to_string();
     c.inject.recall = recall;
@@ -1219,7 +1309,8 @@ enum Mode {
 
 fn last_prompt(msgs: &[Value]) -> Option<String> {
     msgs.iter().rev().filter(|m| m["role"] == "user").find_map(|m| {
-        let t: Vec<String> = blocks_of(&m["content"]).iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str().map(String::from)).collect();
+        let t: Vec<String> =
+            blocks_of(&m["content"]).iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str().map(String::from)).collect();
         (!t.is_empty()).then(|| t.join("\n"))
     })
 }
@@ -1227,7 +1318,8 @@ fn last_prompt(msgs: &[Value]) -> Option<String> {
 async fn naive_recall(e: &Engine, cwd: &str, session: &str, prompt: &str) -> Result<Option<String>> {
     let ctx = e.ctx_for("claude-code", session, Some(cwd));
     let out = e.recall(&ctx, RecallReq { query: prompt.to_string(), project: None, k: 5, passive: true, ..Default::default() }).await?;
-    Ok((!out.notes.is_empty()).then(|| format!("<memory>\nRelevant notes from long-term memory:\n{}</memory>", e.render_hits(&out.notes, &ctx))))
+    Ok((!out.notes.is_empty())
+        .then(|| format!("<memory>\nRelevant notes from long-term memory:\n{}</memory>", e.render_hits(&out.notes, &ctx))))
 }
 
 const CONV: &[&str] = &[
@@ -1313,7 +1405,12 @@ async fn converse(
                 leak_checks(ck, &posted, &vis, &format!("conversation turn {t}"));
             }
             msgs.push(json!({"role":"assistant","content": vis.content.clone()}));
-            let bash: Vec<String> = vis.content.iter().filter(|b| b["type"] == "tool_use" && b["name"] == "Bash").filter_map(|b| b["id"].as_str().map(String::from)).collect();
+            let bash: Vec<String> = vis
+                .content
+                .iter()
+                .filter(|b| b["type"] == "tool_use" && b["name"] == "Bash")
+                .filter_map(|b| b["id"].as_str().map(String::from))
+                .collect();
             if bash.is_empty() {
                 break;
             }
@@ -1375,7 +1472,12 @@ async fn e2(root: &Path) -> Result<Value> {
     let warm = 20;
     // "gateway-nodelay": the same gateway state served with TCP_NODELAY on its client-facing sockets (diagnostic;
     // `unimem serve` does not set it).
-    let targets = [("direct", mock_url.as_str()), ("gateway", gw.as_str()), ("gateway-norecall", gw_nr.as_str()), ("gateway-nodelay", gw_nd.as_str())];
+    let targets = [
+        ("direct", mock_url.as_str()),
+        ("gateway", gw.as_str()),
+        ("gateway-norecall", gw_nr.as_str()),
+        ("gateway-nodelay", gw_nd.as_str()),
+    ];
     let mut lat_s: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
     let mut body_bytes = vec![];
     for i in 0..(n_req + warm) {
@@ -1439,7 +1541,11 @@ async fn e2(root: &Path) -> Result<Value> {
             for stream in [true, false] {
                 let ctxs = format!("{m}/{}/rep{rep}", if stream { "stream" } else { "json" });
                 let session = session_uuid(0xB0, (rep * 100 + markers.iter().position(|x| *x == m).unwrap() * 2 + stream as usize) as u64);
-                let prompt = if m == "plain" { format!("Explain the invoices module, part {rep}.") } else { format!("[[{m}]] please help with the deploy step {rep}") };
+                let prompt = if m == "plain" {
+                    format!("Explain the invoices module, part {rep}.")
+                } else {
+                    format!("[[{m}]] please help with the deploy step {rep}")
+                };
                 let mut msgs = vec![json!({"role":"user","content":[{"type":"text","text": prompt}]})];
                 let before = mock.seen.lock().len();
                 let body = agent_body(&system, &tools, &msgs, stream);
@@ -1451,20 +1557,35 @@ async fn e2(root: &Path) -> Result<Value> {
                 upstream_reqs += ups.len() as u64;
                 continuations += ups.len().saturating_sub(1) as u64;
                 let ours_only = m == "recall" || m == "remember";
-                ck.check(!ups.is_empty() && names_of(&ups[0]["tools"]) == [names_of(&tools), vec!["unimem_recall".into(), "unimem_remember".into(), "unimem_forget".into(), "unimem_project".into()]].concat(), "tools_appended_in_order", &ctxs);
+                ck.check(
+                    !ups.is_empty()
+                        && names_of(&ups[0]["tools"])
+                            == [
+                                names_of(&tools),
+                                vec!["unimem_recall".into(), "unimem_remember".into(), "unimem_forget".into(), "unimem_project".into()],
+                            ]
+                            .concat(),
+                    "tools_appended_in_order",
+                    &ctxs,
+                );
                 ck.check(!ups.is_empty() && ups[0]["system"] == system, "system_untouched", &ctxs);
                 ck.check(ups.len() == if ours_only { 2 } else { 1 }, "continuation_count", &format!("{ctxs}: upstream={}", ups.len()));
                 let want_stop = if m == "mixed" || m == "bash" { "tool_use" } else { "end_turn" };
                 ck.check(vis.stop == want_stop, "visible_stop_reason", &format!("{ctxs}: {}", vis.stop));
                 if m == "mixed" || m == "bash" {
-                    ck.check(vis.content.iter().any(|b| b["name"] == "Bash" && b["input"] == json!({"command":"cargo test"})), "harness_tool_call_delivered", &ctxs);
+                    ck.check(
+                        vis.content.iter().any(|b| b["name"] == "Bash" && b["input"] == json!({"command":"cargo test"})),
+                        "harness_tool_call_delivered",
+                        &ctxs,
+                    );
                 }
                 if ours_only {
                     ck.check(vis.content.iter().filter(|b| b["type"] == "text").count() == 2, "rounds_merged_into_one_message", &ctxs);
                 }
                 // follow-up request (harness echoes the visible message)
                 msgs.push(json!({"role":"assistant","content": vis.content.clone()}));
-                let bash: Vec<String> = vis.content.iter().filter(|b| b["name"] == "Bash").filter_map(|b| b["id"].as_str().map(String::from)).collect();
+                let bash: Vec<String> =
+                    vis.content.iter().filter(|b| b["name"] == "Bash").filter_map(|b| b["id"].as_str().map(String::from)).collect();
                 if bash.is_empty() {
                     msgs.push(json!({"role":"user","content":[{"type":"text","text":"thanks, continue"}]}));
                 } else {
@@ -1485,16 +1606,36 @@ async fn e2(root: &Path) -> Result<Value> {
                 let um = u["messages"].as_array().cloned().unwrap_or_default();
                 match m {
                     "recall" | "remember" => {
-                        ck.check(um.len() == msgs.len() + 2 && has_unimem_use(&um[1]) && um[2]["content"][0]["type"] == "tool_result", "hidden_rounds_replayed", &format!("{ctxs}: {} msgs", um.len()));
+                        ck.check(
+                            um.len() == msgs.len() + 2 && has_unimem_use(&um[1]) && um[2]["content"][0]["type"] == "tool_result",
+                            "hidden_rounds_replayed",
+                            &format!("{ctxs}: {} msgs", um.len()),
+                        );
                         let same = ups.len() == 2 && um.len() > 2 && um[1] == ups[1]["messages"][1] && um[2] == ups[1]["messages"][2];
                         if !same && std::env::var("UNIMEM_BENCH_DEBUG").is_ok() {
-                            eprintln!("REPLAY {ctxs}\n cont: {}\n {}\n replay: {}\n {}", ups.get(1).map(|u| u["messages"][1].to_string()).unwrap_or_default(), ups.get(1).map(|u| u["messages"][2].to_string()).unwrap_or_default(), um[1], um[2]);
+                            eprintln!(
+                                "REPLAY {ctxs}\n cont: {}\n {}\n replay: {}\n {}",
+                                ups.get(1).map(|u| u["messages"][1].to_string()).unwrap_or_default(),
+                                ups.get(1).map(|u| u["messages"][2].to_string()).unwrap_or_default(),
+                                um[1],
+                                um[2]
+                            );
                         }
                         ck.check(same, "replay_byte_identical_to_continuation", &ctxs);
                     }
                     "mixed" => {
                         let first_user = blocks_of(&um.get(2).cloned().unwrap_or_default()["content"]);
-                        ck.check(um.len() == msgs.len() && has_unimem_use(&um[1]) && first_user.len() == 2 && first_user[0]["tool_use_id"].as_str().is_some_and(|s| s.starts_with("toolu_um")), "mixed_hidden_call_and_result_replayed", &format!("{ctxs}: {}", serde_json::to_string(&um.get(2)).unwrap_or_default().chars().take(200).collect::<String>()));
+                        ck.check(
+                            um.len() == msgs.len()
+                                && has_unimem_use(&um[1])
+                                && first_user.len() == 2
+                                && first_user[0]["tool_use_id"].as_str().is_some_and(|s| s.starts_with("toolu_um")),
+                            "mixed_hidden_call_and_result_replayed",
+                            &format!(
+                                "{ctxs}: {}",
+                                serde_json::to_string(&um.get(2)).unwrap_or_default().chars().take(200).collect::<String>()
+                            ),
+                        );
                     }
                     _ => {
                         ck.check(um.len() == msgs.len() && um[1] == msgs[1], "plain_history_unchanged", &ctxs);
@@ -1532,7 +1673,13 @@ async fn e2(root: &Path) -> Result<Value> {
         }
     }
     mock.record.store(false, Ordering::SeqCst);
-    println!("[e2] correctness: {} passed, {} failed; anchor-collision probe: {}/{} sessions got another session's hidden rounds", ck.pass, ck.fail.len(), probe.0, probe.1);
+    println!(
+        "[e2] correctness: {} passed, {} failed; anchor-collision probe: {}/{} sessions got another session's hidden rounds",
+        ck.pass,
+        ck.fail.len(),
+        probe.0,
+        probe.1
+    );
 
     // ---------------- cache stability over a 30-turn conversation
     let mut conv = serde_json::Map::new();
@@ -1590,7 +1737,17 @@ async fn mock5_handler(State(m): State<Arc<Mock5>>, body: Bytes) -> Response {
     let (content, stop) = if let Some(cmd) = text.split("[[run:").nth(1).and_then(|r| r.split("]]").next()) {
         (vec![text_block_e5("Running it."), tool_use(&format!("toolu_e5_{n}"), "Bash", json!({"command": cmd}))], "tool_use")
     } else if text.contains("[[recall]]") && has_ours && !ours_result {
-        (vec![text_block_e5("Let me check memory."), tool_use(&format!("toolu_um{n}"), "unimem_recall", json!({"query": "ledger-api conventions for tests, deploys and migrations", "k": 8}))], "tool_use")
+        (
+            vec![
+                text_block_e5("Let me check memory."),
+                tool_use(
+                    &format!("toolu_um{n}"),
+                    "unimem_recall",
+                    json!({"query": "ledger-api conventions for tests, deploys and migrations", "k": 8}),
+                ),
+            ],
+            "tool_use",
+        )
     } else {
         (vec![text_block_e5(&format!("Done (r{n}). {FILLER}"))], "end_turn")
     };
@@ -1635,7 +1792,11 @@ const E5_PLANTED: &[(&str, &str)] = &[
     ("Note that the ledger-api staging environment uses the EU Stripe sandbox account.", "EU Stripe sandbox"),
 ];
 
-const E5_CORRECTIONS: &[&str] = &["No, don't use pip for this, use uv add instead.", "That's wrong: amounts are stored in cents, not Decimal.", "不对，部署要用 ops/deploy.sh，不要直接 kubectl apply。"];
+const E5_CORRECTIONS: &[&str] = &[
+    "No, don't use pip for this, use uv add instead.",
+    "That's wrong: amounts are stored in cents, not Decimal.",
+    "不对，部署要用 ops/deploy.sh，不要直接 kubectl apply。",
+];
 
 enum Step {
     Prompt(String),
@@ -1670,7 +1831,9 @@ fn e5_script(queries: &[String]) -> Vec<Step> {
         } else if t % 16 == 5 {
             v.push(Step::Prompt(E5_CORRECTIONS[(t / 16) % E5_CORRECTIONS.len()].to_string()));
         } else if t % 12 == 9 {
-            v.push(Step::Prompt(format!("[[recall]] Before you continue, check what memory says about our test and migration conventions (step {t}).")));
+            v.push(Step::Prompt(format!(
+                "[[recall]] Before you continue, check what memory says about our test and migration conventions (step {t})."
+            )));
         } else {
             v.push(Step::Prompt(queries[q % queries.len()].clone()));
             q += 1;
@@ -1690,7 +1853,18 @@ struct E5Cfg {
 
 /// Long, relevant notes for the heavy variant.
 fn heavy_notes() -> Vec<(String, String)> {
-    let topics = ["tests", "deploys", "migrations", "webhooks", "the invoice batch", "rate limits", "money columns", "SQLAlchemy", "Postgres", "reviews"];
+    let topics = [
+        "tests",
+        "deploys",
+        "migrations",
+        "webhooks",
+        "the invoice batch",
+        "rate limits",
+        "money columns",
+        "SQLAlchemy",
+        "Postgres",
+        "reviews",
+    ];
     (0..40)
         .map(|i| {
             let t = topics[i % topics.len()];
@@ -1719,7 +1893,18 @@ async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
     if vc.heavy {
         let ctx = engine.ctx_for("claude-code", "seed", Some(&cwd));
         for (c, w) in heavy_notes() {
-            engine.write(&ctx, WriteReq { content: c, why: Some(w), kind: Some("procedure".into()), scope: Some("project".into()), ..Default::default() }).await?;
+            engine
+                .write(
+                    &ctx,
+                    WriteReq {
+                        content: c,
+                        why: Some(w),
+                        kind: Some("procedure".into()),
+                        scope: Some("project".into()),
+                        ..Default::default()
+                    },
+                )
+                .await?;
         }
     }
     let m2n: HashMap<String, String> = {
@@ -1746,7 +1931,8 @@ async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
     let mut rows: Vec<Value> = vec![];
     let mut req = 0usize;
     let (mut dup_new, mut new_total, mut cum_new) = (0usize, 0usize, 0usize);
-    let (mut err_turns, mut err_hits, mut err_avail, mut benign_tool_turns, mut benign_injections) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut err_turns, mut err_hits, mut err_avail, mut benign_tool_turns, mut benign_injections) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut err_detail = vec![];
     let mut compaction: Value = Value::Null;
     let (mut max_live_share, mut max_ctx_share) = (0f64, 0f64);
@@ -1830,7 +2016,12 @@ async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
             let live = est(&up["messages"]).saturating_sub(est(&body["messages"]));
             let ctx_tokens = est(&up);
             let last_up = up["messages"].as_array().and_then(|a| a.last()).cloned().unwrap_or(Value::Null);
-            let new_blocks: Vec<String> = blocks_of(&last_up["content"]).iter().filter_map(|b| b["text"].as_str()).filter(|t| t.contains("<unimem")).map(String::from).collect();
+            let new_blocks: Vec<String> = blocks_of(&last_up["content"])
+                .iter()
+                .filter_map(|b| b["text"].as_str())
+                .filter(|t| t.contains("<unimem"))
+                .map(String::from)
+                .collect();
             let new_text = new_blocks.join("\n");
             let new_tokens = unimem::budget::estimate_tokens(&new_text);
             let earlier = {
@@ -1856,7 +2047,11 @@ async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
                 post_compaction_preamble = Some(new_text.contains("<unimem-context>"));
             }
             if kind == "tool" {
-                let tool_recall_ids: Vec<String> = new_blocks.iter().filter(|b| b.contains("tool-error")).flat_map(|b| id_re.find_iter(b).map(|m| m.as_str().to_string()).collect::<Vec<_>>()).collect();
+                let tool_recall_ids: Vec<String> = new_blocks
+                    .iter()
+                    .filter(|b| b.contains("tool-error"))
+                    .flat_map(|b| id_re.find_iter(b).map(|m| m.as_str().to_string()).collect::<Vec<_>>())
+                    .collect();
                 match expect {
                     Some(gold) => {
                         err_turns += 1;
@@ -1876,7 +2071,11 @@ async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
             rows.push(json!({"request": req, "kind": kind, "context_tokens": ctx_tokens, "unimem_live_tokens": live, "new_injected_tokens": new_tokens, "cumulative_new_tokens": cum_new, "new_note_ids": new_ids.len(), "duplicate_new_ids": dups, "upstream_rounds": ups.len()}));
             let content = vis["content"].as_array().cloned().unwrap_or_default();
             msgs.push(json!({"role":"assistant","content": content.clone()}));
-            let bash: Vec<String> = content.iter().filter(|b| b["type"] == "tool_use" && b["name"] == "Bash").filter_map(|b| b["id"].as_str().map(String::from)).collect();
+            let bash: Vec<String> = content
+                .iter()
+                .filter(|b| b["type"] == "tool_use" && b["name"] == "Bash")
+                .filter_map(|b| b["id"].as_str().map(String::from))
+                .collect();
             if bash.is_empty() {
                 break;
             }
@@ -1970,7 +2169,11 @@ async fn e3_inner(b: &Path, home: &Path) -> Result<Value> {
     let mut add = |name: &str, cwd: PathBuf, expect: Option<String>| cases.push(Case { name: name.into(), cwd, expect, got: None });
 
     let alpha = code.join("alpha");
-    mk_repo(&alpha, &[("origin", "git@github.com:acme/alpha.git")], &[("README.md", "# alpha\n\nAlpha is the main web service.\n"), ("src/deep/nested/mod.rs", "// x\n")])?;
+    mk_repo(
+        &alpha,
+        &[("origin", "git@github.com:acme/alpha.git")],
+        &[("README.md", "# alpha\n\nAlpha is the main web service.\n"), ("src/deep/nested/mod.rs", "// x\n")],
+    )?;
     add("repo root, scp-style ssh remote", alpha.clone(), Some(a.clone()));
     add("nested subdir (3 levels)", alpha.join("src/deep/nested"), Some(a.clone()));
     let variants = [
@@ -2095,7 +2298,12 @@ async fn e3_inner(b: &Path, home: &Path) -> Result<Value> {
     let first = Resolver::default().resolve(&store, leg.to_str().unwrap()).map(|x| x.project.pid);
     git(&leg, &["remote", "add", "origin", "git@github.com:me/legacy.git"])?;
     let later = Resolver::default().resolve(&store, leg.to_str().unwrap()).map(|x| x.project.pid);
-    cases.push(Case { name: "repo gains a remote after first sight (identity kept)".into(), cwd: leg.clone(), expect: first.clone(), got: later });
+    cases.push(Case {
+        name: "repo gains a remote after first sight (identity kept)".into(),
+        cwd: leg.clone(),
+        expect: first.clone(),
+        got: later,
+    });
 
     let ok = cases.iter().filter(|c| c.got == c.expect).count();
     let rows: Vec<Value> = cases
@@ -2106,7 +2314,9 @@ async fn e3_inner(b: &Path, home: &Path) -> Result<Value> {
     for r in rows.iter().filter(|r| r["ok"] == false) {
         println!("[e3] FAIL {}: expect {} got {}", r["case"], r["expect"], r["got"]);
     }
-    Ok(json!({"experiment": "E3 project identification", "cases": cases.len(), "correct": ok, "accuracy": r3(ok as f64 / cases.len() as f64), "rows": rows}))
+    Ok(
+        json!({"experiment": "E3 project identification", "cases": cases.len(), "correct": ok, "accuracy": r3(ok as f64 / cases.len() as f64), "rows": rows}),
+    )
 }
 
 // ============================================================================ E4 throughput
@@ -2129,11 +2339,61 @@ impl Rng {
     }
 }
 
-const SVC: &[&str] = &["auth", "billing", "search", "gateway", "ingest", "worker", "scheduler", "notifier", "reports", "exporter", "importer", "ledger", "catalog", "media", "thumbnails", "webhooks", "metrics", "audit", "payments", "profiles"];
-const TECH: &[&str] = &["Postgres", "Redis", "Kafka", "SQLite", "ClickHouse", "NATS", "gRPC", "GraphQL", "FastAPI", "Axum", "Express", "Celery", "Temporal", "Terraform", "Helm", "Docker", "Nix", "pnpm", "uv", "Bazel"];
+const SVC: &[&str] = &[
+    "auth",
+    "billing",
+    "search",
+    "gateway",
+    "ingest",
+    "worker",
+    "scheduler",
+    "notifier",
+    "reports",
+    "exporter",
+    "importer",
+    "ledger",
+    "catalog",
+    "media",
+    "thumbnails",
+    "webhooks",
+    "metrics",
+    "audit",
+    "payments",
+    "profiles",
+];
+const TECH: &[&str] = &[
+    "Postgres",
+    "Redis",
+    "Kafka",
+    "SQLite",
+    "ClickHouse",
+    "NATS",
+    "gRPC",
+    "GraphQL",
+    "FastAPI",
+    "Axum",
+    "Express",
+    "Celery",
+    "Temporal",
+    "Terraform",
+    "Helm",
+    "Docker",
+    "Nix",
+    "pnpm",
+    "uv",
+    "Bazel",
+];
 const PEOPLE: &[&str] = &["Alice", "Bob", "Chen Wei", "Dmitri", "Priya", "Sam", "Yuki", "Lena", "Omar", "Ines"];
 const ENVS: &[&str] = &["dev", "staging", "prod", "qa", "canary"];
-const REASONS: &[&str] = &["the old client leaked connections under load", "it halved p95 latency in the load test", "the vendor dropped support", "the team already knows it", "it removed a whole deploy step", "licensing costs went up", "it made local dev reproducible"];
+const REASONS: &[&str] = &[
+    "the old client leaked connections under load",
+    "it halved p95 latency in the load test",
+    "the vendor dropped support",
+    "the team already knows it",
+    "it removed a whole deploy step",
+    "licensing costs went up",
+    "it made local dev reproducible",
+];
 
 fn synth_note(r: &mut Rng) -> (String, Option<String>) {
     let svc = format!("{}-{}", r.pick(SVC), r.n(60));
@@ -2174,7 +2434,9 @@ fn db_size(p: &Path) -> u64 {
 fn rss_mb() -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
-        .and_then(|s| s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)).and_then(|x| x.parse::<f64>().ok()))
+        .and_then(|s| {
+            s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)).and_then(|x| x.parse::<f64>().ok())
+        })
         .map(|kb| kb / 1024.0)
         .unwrap_or(f64::NAN)
 }
@@ -2185,7 +2447,11 @@ async fn e4(_root: &Path) -> Result<Value> {
     let mut dirs = vec![];
     for i in 0..6 {
         let d = tmp.0.join(format!("ws/proj{i}"));
-        mk_repo(&d, &[("origin", &format!("git@github.com:bench/proj{i}.git"))], &[("README.md", &format!("# proj{i}\n\nSynthetic project number {i} for the throughput bench.\n"))])?;
+        mk_repo(
+            &d,
+            &[("origin", &format!("git@github.com:bench/proj{i}.git"))],
+            &[("README.md", &format!("# proj{i}\n\nSynthetic project number {i} for the throughput bench.\n"))],
+        )?;
         dirs.push(d.display().to_string());
     }
     let db = tmp.0.join("e4.db");
@@ -2216,7 +2482,11 @@ async fn e4(_root: &Path) -> Result<Value> {
             let k = match o {
                 WriteOutcome::Stored { superseded, .. } => {
                     stored += 1;
-                    if superseded.is_empty() { "stored" } else { "stored_superseding" }
+                    if superseded.is_empty() {
+                        "stored"
+                    } else {
+                        "stored_superseding"
+                    }
                 }
                 WriteOutcome::Duplicate { .. } => "duplicate",
                 WriteOutcome::Rejected { .. } => "rejected",
@@ -2246,7 +2516,14 @@ async fn e4(_root: &Path) -> Result<Value> {
         }
         let size_main = std::fs::metadata(&db).map(|m| m.len()).unwrap_or(0);
         let live: i64 = e.store.count_memories().values().sum();
-        println!("[e4] {stored} stored ({attempts} writes): write p50 {} p95 {}; recall p50 {} p95 {}; db {:.1} MB", write_lat["p50_ms"], write_lat["p95_ms"], r3(pct(&rec, 50.0)), r3(pct(&rec, 95.0)), size_main as f64 / 1e6);
+        println!(
+            "[e4] {stored} stored ({attempts} writes): write p50 {} p95 {}; recall p50 {} p95 {}; db {:.1} MB",
+            write_lat["p50_ms"],
+            write_lat["p95_ms"],
+            r3(pct(&rec, 50.0)),
+            r3(pct(&rec, 95.0)),
+            size_main as f64 / 1e6
+        );
         tiers.push(json!({
             "stored_notes": stored, "live_notes": live, "write_attempts": attempts,
             "write_latency_last_500": write_lat, "recall_latency": lat(&rec), "recall_passive_latency": lat(&rec_p),
@@ -2264,13 +2541,46 @@ async fn e4(_root: &Path) -> Result<Value> {
 fn env_info() -> Value {
     let read = |p: &str| std::fs::read_to_string(p).unwrap_or_default();
     let cpuinfo = read("/proc/cpuinfo");
-    let model = cpuinfo.lines().find(|l| l.starts_with("model name") || l.starts_with("Model") || l.starts_with("CPU part")).and_then(|l| l.split(':').nth(1)).map(|s| s.trim().to_string()).unwrap_or_default();
-    let mem_kb: f64 = read("/proc/meminfo").lines().find(|l| l.starts_with("MemTotal")).and_then(|l| l.split_whitespace().nth(1)).and_then(|x| x.parse().ok()).unwrap_or(0.0);
-    let lscpu = std::process::Command::new("lscpu").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
-    let ls = |k: &str| lscpu.lines().find(|l| l.trim_start().starts_with(k)).and_then(|l| l.split(':').nth(1)).map(|s| s.trim().to_string()).unwrap_or_default();
-    let model = if model.is_empty() || model.starts_with("0x") { format!("{} {}", ls("Vendor ID"), ls("Model name")).trim().to_string() } else { model };
-    let os = read("/etc/os-release").lines().find(|l| l.starts_with("PRETTY_NAME=")).map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string()).unwrap_or_default();
-    let cmd = |c: &str, a: &[&str]| std::process::Command::new(c).args(a).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let model = cpuinfo
+        .lines()
+        .find(|l| l.starts_with("model name") || l.starts_with("Model") || l.starts_with("CPU part"))
+        .and_then(|l| l.split(':').nth(1))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let mem_kb: f64 = read("/proc/meminfo")
+        .lines()
+        .find(|l| l.starts_with("MemTotal"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(0.0);
+    let lscpu =
+        std::process::Command::new("lscpu").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let ls = |k: &str| {
+        lscpu
+            .lines()
+            .find(|l| l.trim_start().starts_with(k))
+            .and_then(|l| l.split(':').nth(1))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    let model = if model.is_empty() || model.starts_with("0x") {
+        format!("{} {}", ls("Vendor ID"), ls("Model name")).trim().to_string()
+    } else {
+        model
+    };
+    let os = read("/etc/os-release")
+        .lines()
+        .find(|l| l.starts_with("PRETTY_NAME="))
+        .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+        .unwrap_or_default();
+    let cmd = |c: &str, a: &[&str]| {
+        std::process::Command::new(c)
+            .args(a)
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    };
     json!({
         "cpus": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
         "cpu_model": model, "arch": std::env::consts::ARCH,
@@ -2285,7 +2595,11 @@ fn f(v: &Value) -> String {
         Value::Null => "–".into(),
         Value::Number(n) => {
             let x = n.as_f64().unwrap_or(0.0);
-            if n.is_i64() || n.is_u64() { format!("{x}") } else { format!("{x:.3}") }
+            if n.is_i64() || n.is_u64() {
+                format!("{x}")
+            } else {
+                format!("{x:.3}")
+            }
         }
         Value::String(s) => s.clone(),
         other => other.to_string(),
@@ -2319,9 +2633,21 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
             let o = &e1["systems"][n]["overall"];
             s.push_str(&format!(
                 "| {n} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
-                f(&o["recall@1"]), f(&o["recall@5"]), f(&o["mrr"]), f(&o["notes_per_query"]), f(&o["precision_answerable"]), pctf(&o["scope_leak_rate"]), pctf(&o["forbidden_hit_rate"]),
-                pctf(&o["stale_returned_rate"]), pctf(&o["stale_unflagged_rate"]), pctf(&o["stale_above_gold_rate"]), pctf(&o["abstain_rate"]), pctf(&o["abstain_or_insufficient_rate"]),
-                pctf(&o["false_abstain_rate"]), pctf(&o["unsafe_note_returned_rate"]), f(&o["latency_ms_mean"])
+                f(&o["recall@1"]),
+                f(&o["recall@5"]),
+                f(&o["mrr"]),
+                f(&o["notes_per_query"]),
+                f(&o["precision_answerable"]),
+                pctf(&o["scope_leak_rate"]),
+                pctf(&o["forbidden_hit_rate"]),
+                pctf(&o["stale_returned_rate"]),
+                pctf(&o["stale_unflagged_rate"]),
+                pctf(&o["stale_above_gold_rate"]),
+                pctf(&o["abstain_rate"]),
+                pctf(&o["abstain_or_insufficient_rate"]),
+                pctf(&o["false_abstain_rate"]),
+                pctf(&o["unsafe_note_returned_rate"]),
+                f(&o["latency_ms_mean"])
             ));
         }
         s.push_str("\n`sufficient=false` on answerable queries (the 'I don't know' signal misfiring): ");
@@ -2353,22 +2679,39 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
         s.push_str("\n### Cross-harness: unified vs per-harness silo (answerable queries)\n\n| system | cross-harness R@5 | cross-harness MRR | same-harness R@5 | same-harness MRR |\n|---|---|---|---|---|\n");
         for n in &names {
             let x = &e1["systems"][n];
-            s.push_str(&format!("| {n} | {} | {} | {} | {} |\n", f(&x["cross_harness"]["recall@5"]), f(&x["cross_harness"]["mrr"]), f(&x["same_harness"]["recall@5"]), f(&x["same_harness"]["mrr"])));
+            s.push_str(&format!(
+                "| {n} | {} | {} | {} | {} |\n",
+                f(&x["cross_harness"]["recall@5"]),
+                f(&x["cross_harness"]["mrr"]),
+                f(&x["same_harness"]["recall@5"]),
+                f(&x["same_harness"]["mrr"])
+            ));
         }
         s.push_str("\n### Scope isolation detail\n\n| system | scope_isolation R@5 | forbidden hit (isolation queries) | leak rate (isolation queries) |\n|---|---|---|---|\n");
         for n in &names {
             let o = &e1["systems"][n]["by_cat"]["scope_isolation"];
-            s.push_str(&format!("| {n} | {} | {} | {} |\n", f(&o["recall@5"]), pctf(&o["forbidden_hit_rate"]), pctf(&o["scope_leak_rate"])));
+            s.push_str(&format!(
+                "| {n} | {} | {} | {} |\n",
+                f(&o["recall@5"]),
+                pctf(&o["forbidden_hit_rate"]),
+                pctf(&o["scope_leak_rate"])
+            ));
         }
         let w = &e1["write_screen"];
         let sm = &w["summary"];
         s.push_str("\n### Write path (unimem, unified store)\n\n| metric | value |\n|---|---|\n");
         for (k, v) in [
-            ("rejection precision", &sm["reject_precision"]), ("rejection recall", &sm["reject_recall"]),
-            ("duplicate precision", &sm["dup_precision"]), ("duplicate recall", &sm["dup_recall"]), ("duplicate recall (correct original)", &sm["dup_recall_correct_original"]),
-            ("supersede precision (pairs)", &sm["supersede_precision"]), ("supersede recall (pairs)", &sm["supersede_recall"]),
-            ("scope-assignment accuracy", &sm["scope_accuracy"]), ("kind accuracy", &sm["kind_accuracy"]),
-            ("decoy false-reject rate", &sm["decoy_false_reject_rate"]), ("distractor false-supersede rate (pairs)", &sm["distractor_false_supersede_rate"]),
+            ("rejection precision", &sm["reject_precision"]),
+            ("rejection recall", &sm["reject_recall"]),
+            ("duplicate precision", &sm["dup_precision"]),
+            ("duplicate recall", &sm["dup_recall"]),
+            ("duplicate recall (correct original)", &sm["dup_recall_correct_original"]),
+            ("supersede precision (pairs)", &sm["supersede_precision"]),
+            ("supersede recall (pairs)", &sm["supersede_recall"]),
+            ("scope-assignment accuracy", &sm["scope_accuracy"]),
+            ("kind accuracy", &sm["kind_accuracy"]),
+            ("decoy false-reject rate", &sm["decoy_false_reject_rate"]),
+            ("distractor false-supersede rate (pairs)", &sm["distractor_false_supersede_rate"]),
             ("distractor target wrongly superseded (by anything)", &sm["distractor_target_wrongly_superseded_rate"]),
         ] {
             s.push_str(&format!("| {k} | {} |\n", f(v)));
@@ -2376,33 +2719,71 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
         s.push_str(&format!("\nRejections per type: {}. False rejects: {}. Duplicates: {} gold, {} detected, {} false positives ({} of them were superseding updates swallowed as duplicates). Supersede pairs: {} gold, {} predicted, {} correct; lost updates (supersede notes not stored): {}.\n",
             w["rejection"]["per_type_recall"], w["rejection"]["fp"], f(&w["duplicates"]["gold"]), f(&w["duplicates"]["detected"]), f(&w["duplicates"]["false_positive"]), f(&w["duplicates"]["supersede_swallowed_as_duplicate"]),
             f(&w["supersede"]["gold_pairs"]), f(&w["supersede"]["predicted_pairs"]), f(&w["supersede"]["correct_pairs"]), w["supersede"]["lost_updates"].as_array().map(|a| a.len()).unwrap_or(0)));
-        s.push_str(&format!("\nDecoys rejected per type: {} (of {}). Distractor pairs: {}, false supersedes: {}.\n", w["decoys"]["per_type_rejected"], f(&w["decoys"]["n"]), f(&w["distractors"]["pairs"]), w["distractors"]["false_supersede_pairs"]));
+        s.push_str(&format!(
+            "\nDecoys rejected per type: {} (of {}). Distractor pairs: {}, false supersedes: {}.\n",
+            w["decoys"]["per_type_rejected"],
+            f(&w["decoys"]["n"]),
+            f(&w["distractors"]["pairs"]),
+            w["distractors"]["false_supersede_pairs"]
+        ));
         s.push_str("\nScope assignment by group:\n\n| group | correct / n | accuracy |\n|---|---|---|\n");
         if let Some(o) = w["scope"]["by_group"].as_object() {
             for (k, v) in o {
                 s.push_str(&format!("| {k} | {}/{} | {} |\n", f(&v["correct"]), f(&v["n"]), f(&v["acc"])));
             }
         }
-        s.push_str(&format!("\nScope confusion: {}. Graph edges created: {}. Write latency: p50 {} ms, p95 {} ms.\n", w["scope"]["confusion"], e1["edges"], f(&e1["write_latency"]["p50_ms"]), f(&e1["write_latency"]["p95_ms"])));
+        s.push_str(&format!(
+            "\nScope confusion: {}. Graph edges created: {}. Write latency: p50 {} ms, p95 {} ms.\n",
+            w["scope"]["confusion"],
+            e1["edges"],
+            f(&e1["write_latency"]["p50_ms"]),
+            f(&e1["write_latency"]["p95_ms"])
+        ));
     }
     if let Some(e2) = load("e2_gateway.json") {
         s.push_str(&format!("\n## E2 — gateway overhead & correctness\n\n{} requests per cell (+{} warm-up), request body ≈ {} bytes (Claude-Code-like: 12 tools, ~11 KB system prompt, 0–10 history messages). Mock upstream responds instantly, so numbers are pure gateway cost.\n\n", f(&e2["setup"]["requests_per_cell"]), f(&e2["setup"]["warmup"]), f(&e2["setup"]["request_body_bytes"]["stream"])));
         s.push_str("| path | TTFB p50 | TTFB p95 | total p50 | total p95 |\n|---|---|---|---|---|\n");
         if let Some(o) = e2["latency"].as_object() {
             for (k, v) in o {
-                s.push_str(&format!("| {k} | {} | {} | {} | {} |\n", f(&v["ttfb"]["p50_ms"]), f(&v["ttfb"]["p95_ms"]), f(&v["total"]["p50_ms"]), f(&v["total"]["p95_ms"])));
+                s.push_str(&format!(
+                    "| {k} | {} | {} | {} | {} |\n",
+                    f(&v["ttfb"]["p50_ms"]),
+                    f(&v["ttfb"]["p95_ms"]),
+                    f(&v["total"]["p50_ms"]),
+                    f(&v["total"]["p95_ms"])
+                ));
             }
         }
         s.push_str("\nAdded latency vs direct (ms; difference of percentiles, and paired per-request difference p50/p95):\n\n| via | +TTFB p50 | +TTFB p95 | +total p50 | +total p95 | paired ΔTTFB p50/p95 |\n|---|---|---|---|---|---|\n");
         if let Some(o) = e2["overhead"].as_object() {
             for (k, v) in o {
-                s.push_str(&format!("| {k} | {} | {} | {} | {} | {} / {} |\n", f(&v["added_ttfb_p50_ms"]), f(&v["added_ttfb_p95_ms"]), f(&v["added_total_p50_ms"]), f(&v["added_total_p95_ms"]), f(&v["paired_diff_ttfb"]["p50_ms"]), f(&v["paired_diff_ttfb"]["p95_ms"])));
+                s.push_str(&format!(
+                    "| {k} | {} | {} | {} | {} | {} / {} |\n",
+                    f(&v["added_ttfb_p50_ms"]),
+                    f(&v["added_ttfb_p95_ms"]),
+                    f(&v["added_total_p50_ms"]),
+                    f(&v["added_total_p95_ms"]),
+                    f(&v["paired_diff_ttfb"]["p50_ms"]),
+                    f(&v["paired_diff_ttfb"]["p95_ms"])
+                ));
             }
         }
         s.push_str("\n### Prompt-cache stability (30-turn conversation, streaming)\n\nPrefix fraction = byte-identical common prefix of consecutive upstream requests (tools → system → messages) divided by the earlier request's length; 1.0 means the whole previous request is a cacheable prefix.\n\n| mode | client req | upstream req | continuation rounds | mean prefix fraction | min | fully stable transitions | cacheable byte ratio | system stable | tools stable |\n|---|---|---|---|---|---|---|---|---|---|\n");
         if let Some(o) = e2["cache_stability"].as_object() {
             for (k, v) in o {
-                s.push_str(&format!("| {k} | {} | {} | {} | {} | {} | {}/{} | {} | {} | {} |\n", f(&v["client_requests"]), f(&v["upstream_requests"]), f(&v["continuation_rounds"]), f(&v["prefix_fraction_mean"]), f(&v["prefix_fraction_min"]), f(&v["fully_prefix_stable_transitions"]), f(&v["transitions"]), f(&v["cacheable_byte_ratio"]), f(&v["system_byte_stable"]), f(&v["tools_byte_stable"])));
+                s.push_str(&format!(
+                    "| {k} | {} | {} | {} | {} | {} | {}/{} | {} | {} | {} |\n",
+                    f(&v["client_requests"]),
+                    f(&v["upstream_requests"]),
+                    f(&v["continuation_rounds"]),
+                    f(&v["prefix_fraction_mean"]),
+                    f(&v["prefix_fraction_min"]),
+                    f(&v["fully_prefix_stable_transitions"]),
+                    f(&v["transitions"]),
+                    f(&v["cacheable_byte_ratio"]),
+                    f(&v["system_byte_stable"]),
+                    f(&v["tools_byte_stable"])
+                ));
             }
         }
         let c = &e2["correctness"];
@@ -2424,7 +2805,13 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
     if let Some(e3) = load("e3_project.json") {
         s.push_str(&format!("\n## E3 — project identification\n\n**{} / {} layouts correct ({}).**\n\n| case | expected pid | got | ok |\n|---|---|---|---|\n", f(&e3["correct"]), f(&e3["cases"]), pctf(&e3["accuracy"])));
         for r in e3["rows"].as_array().cloned().unwrap_or_default() {
-            s.push_str(&format!("| {} | {} | {} | {} |\n", f(&r["case"]), f(&r["expect"]).replace('|', "\\|"), f(&r["got"]), if r["ok"] == true { "✓" } else { "✗" }));
+            s.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                f(&r["case"]),
+                f(&r["expect"]).replace('|', "\\|"),
+                f(&r["got"]),
+                if r["ok"] == true { "✓" } else { "✗" }
+            ));
         }
     }
     if let Some(e4) = load("e4_throughput.json") {
@@ -2432,8 +2819,19 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
         for t in e4["tiers"].as_array().cloned().unwrap_or_default() {
             s.push_str(&format!(
                 "| {} | {} | {} | {} ms | {} ms | {} ms | {} ms | {} / {} ms | {} | {:.2} MB | {} | {} |\n",
-                f(&t["stored_notes"]), f(&t["live_notes"]), f(&t["write_attempts"]), f(&t["write_latency_last_500"]["p50_ms"]), f(&t["write_latency_last_500"]["p95_ms"]), f(&t["recall_latency"]["p50_ms"]), f(&t["recall_latency"]["p95_ms"]),
-                f(&t["recall_passive_latency"]["p50_ms"]), f(&t["recall_passive_latency"]["p95_ms"]), f(&t["notes_returned_per_recall"]), t["db_bytes_after_checkpoint"].as_f64().unwrap_or(0.0) / 1e6, f(&t["bytes_per_note"]), f(&t["rss_mb"])
+                f(&t["stored_notes"]),
+                f(&t["live_notes"]),
+                f(&t["write_attempts"]),
+                f(&t["write_latency_last_500"]["p50_ms"]),
+                f(&t["write_latency_last_500"]["p95_ms"]),
+                f(&t["recall_latency"]["p50_ms"]),
+                f(&t["recall_latency"]["p95_ms"]),
+                f(&t["recall_passive_latency"]["p50_ms"]),
+                f(&t["recall_passive_latency"]["p95_ms"]),
+                f(&t["notes_returned_per_recall"]),
+                t["db_bytes_after_checkpoint"].as_f64().unwrap_or(0.0) / 1e6,
+                f(&t["bytes_per_note"]),
+                f(&t["rss_mb"])
             ));
         }
     }
@@ -2445,9 +2843,23 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
                 let x = &v["summary"];
                 s.push_str(&format!(
                     "| {k} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}/{} | {} | {} | {}/{} |\n",
-                    f(&x["max_unimem_live_tokens"]), pctf(&x["max_unimem_context_share"]), pctf(&x["max_total_context_share"]), f(&x["cumulative_new_injected_tokens"]), f(&x["new_note_injections"]), f(&x["duplicate_injections"]),
-                    f(&x["preamble_reinjected_after_compaction"]), f(&x["compaction"]["request_passed_through_untouched"]), f(&x["tool_error_turns"]), f(&x["tool_error_recall_hits"]), f(&x["tool_error_gold_in_context"]),
-                    f(&x["benign_tool_turn_injections"]), f(&x["benign_tool_turns"]), f(&x["corrections_hinted"]), f(&x["flush_nudge_at_request"]), f(&x["planted_captured_by_compaction"]), f(&x["planted_before_compaction"])
+                    f(&x["max_unimem_live_tokens"]),
+                    pctf(&x["max_unimem_context_share"]),
+                    pctf(&x["max_total_context_share"]),
+                    f(&x["cumulative_new_injected_tokens"]),
+                    f(&x["new_note_injections"]),
+                    f(&x["duplicate_injections"]),
+                    f(&x["preamble_reinjected_after_compaction"]),
+                    f(&x["compaction"]["request_passed_through_untouched"]),
+                    f(&x["tool_error_turns"]),
+                    f(&x["tool_error_recall_hits"]),
+                    f(&x["tool_error_gold_in_context"]),
+                    f(&x["benign_tool_turn_injections"]),
+                    f(&x["benign_tool_turns"]),
+                    f(&x["corrections_hinted"]),
+                    f(&x["flush_nudge_at_request"]),
+                    f(&x["planted_captured_by_compaction"]),
+                    f(&x["planted_before_compaction"])
                 ));
             }
         }

@@ -74,10 +74,7 @@ Ground rules for benchmark claims:
 
 ## Style
 
-- `cargo fmt` and `cargo clippy --all-targets` should be clean for the code you touch.
-  Note: the existing code base predates rustfmt enforcement and has not been reformatted yet, so the CI `fmt` job
-  is advisory for now. Please don't send PRs that only reformat files you didn't otherwise change. A single
-  repo-wide `cargo fmt` commit will land separately.
+- `cargo fmt --check` (config in `rustfmt.toml`) and `cargo clippy --all-targets` must be clean; CI enforces both.
 - Keep the gateway **fail-open**. Any error in the memory layer must degrade to forwarding the original request.
 - Keep changes **cache-safe**. Never modify the system prompt or reorder existing content. Anything injected must be
   replayed byte-for-byte on later requests (overlays).

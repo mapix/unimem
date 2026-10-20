@@ -71,7 +71,8 @@ pub fn defs(with_cwd: bool) -> Vec<ToolDef> {
     ];
     if with_cwd {
         for d in v.iter_mut() {
-            d.schema["properties"]["cwd"] = json!({"type": "string", "description": "Your current working directory (used to identify the project)."});
+            d.schema["properties"]["cwd"] =
+                json!({"type": "string", "description": "Your current working directory (used to identify the project)."});
         }
     }
     v
@@ -122,7 +123,10 @@ async fn exec_inner(engine: &Engine, ctx: &Ctx, name: &str, args: &Value) -> any
             let k = explicit_k.unwrap_or(5).clamp(1, kmax) as usize;
             let out = engine.recall(ctx, RecallReq { query: q, project: s(args, "project"), k, passive: false, depth }).await?;
             if out.notes.is_empty() {
-                return Ok(format!("No matching memories (searched: {}). sufficient: false — memory does not know; check the code or ask the user.", out.scopes.join(", ")));
+                return Ok(format!(
+                    "No matching memories (searched: {}). sufficient: false — memory does not know; check the code or ask the user.",
+                    out.scopes.join(", ")
+                ));
             }
             // the result is replayed for the rest of the conversation: it gets a token cap (`inject.max_tool_tokens`);
             // a lookup by id returns the full note
@@ -131,8 +135,23 @@ async fn exec_inner(engine: &Engine, ctx: &Ctx, name: &str, args: &Value) -> any
             let ranked = depth == Depth::TopK && out.mode != "id";
             let (body, got) = engine.render_lines(&out.notes, ctx, cap, out.mode == "id", ranked);
             let more = out.notes.len() - got.len();
-            let head = if ranked { format!("sufficient: {}\n{} notes ranked by relevance (score first; low scores are weak matches):\n", out.sufficient, got.len()) } else { format!("sufficient: {}\n", out.sufficient) };
-            Ok(format!("{head}{body}{}{foot}", if more > 0 { format!("({more} more notes omitted to stay within the token budget; narrow the query.)\n") } else { String::new() }))
+            let head = if ranked {
+                format!(
+                    "sufficient: {}\n{} notes ranked by relevance (score first; low scores are weak matches):\n",
+                    out.sufficient,
+                    got.len()
+                )
+            } else {
+                format!("sufficient: {}\n", out.sufficient)
+            };
+            Ok(format!(
+                "{head}{body}{}{foot}",
+                if more > 0 {
+                    format!("({more} more notes omitted to stay within the token budget; narrow the query.)\n")
+                } else {
+                    String::new()
+                }
+            ))
         }
         "unimem_remember" => {
             let req = WriteReq {

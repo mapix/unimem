@@ -42,12 +42,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use sha2::{Digest, Sha256};
 use unimem::config::Config;
 use unimem::decide::ChainDecider;
 use unimem::embed::{Embedder, HashEmbedder};
 use unimem::engine::{Ctx, Depth, Engine, RecallReq, WriteOutcome, WriteReq};
 use unimem::store::{cosine, Memory, Source, Store};
-use sha2::{Digest, Sha256};
 
 const KS: [usize; 7] = [1, 3, 5, 10, 25, 30, 50];
 const RECALL_K: usize = 10;
@@ -137,7 +137,8 @@ fn parse_locomo_date(s: &str) -> i64 {
         ("am", 12) => 0,
         (_, h) => h,
     };
-    const M: [&str; 12] = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    const M: [&str; 12] =
+        ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
     let mon = M.iter().position(|m| *m == p[4]).map(|i| i as i64 + 1).unwrap_or(1);
     ymd_hm(p[5].parse().unwrap_or(1970), mon, p[3].parse().unwrap_or(1), h, mi)
 }
@@ -234,7 +235,9 @@ fn load_locomo(cache: &Path, all: bool) -> Result<(Vec<Corpus>, Value)> {
         let sample = conv["sample_id"].as_str().unwrap_or("conv").to_string();
         let mut sess_keys: Vec<(usize, String)> = c
             .as_object()
-            .map(|o| o.keys().filter_map(|k| k.strip_prefix("session_").and_then(|n| n.parse::<usize>().ok()).map(|n| (n, k.clone()))).collect())
+            .map(|o| {
+                o.keys().filter_map(|k| k.strip_prefix("session_").and_then(|n| n.parse::<usize>().ok()).map(|n| (n, k.clone()))).collect()
+            })
             .unwrap_or_default();
         sess_keys.sort();
         let mut units = vec![];
@@ -285,7 +288,9 @@ impl EmbCache {
     fn load(cache: &Path, set: &str) -> Result<Self> {
         let tp = cache.join(format!("emb/{set}.texts.jsonl"));
         let vp = cache.join(format!("emb/{set}.e5s.f32"));
-        let f = std::io::BufReader::new(std::fs::File::open(&tp).with_context(|| format!("{} (run bench/std/embed_e5.py --set {set})", tp.display()))?);
+        let f = std::io::BufReader::new(
+            std::fs::File::open(&tp).with_context(|| format!("{} (run bench/std/embed_e5.py --set {set})", tp.display()))?,
+        );
         let mut idx = HashMap::new();
         let mut texts = vec![];
         for (i, l) in f.lines().enumerate() {
@@ -324,7 +329,15 @@ impl Embedder for CachedE5 {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         texts
             .iter()
-            .map(|t| self.q.get(t).or_else(|| self.p.get(t)).or_else(|| self.q.get(t.trim())).or_else(|| self.p.get(t.trim())).map(|v| v.to_vec()).ok_or_else(|| anyhow!("text not in e5 cache: {}", t.chars().take(60).collect::<String>())))
+            .map(|t| {
+                self.q
+                    .get(t)
+                    .or_else(|| self.p.get(t))
+                    .or_else(|| self.q.get(t.trim()))
+                    .or_else(|| self.p.get(t.trim()))
+                    .map(|v| v.to_vec())
+                    .ok_or_else(|| anyhow!("text not in e5 cache: {}", t.chars().take(60).collect::<String>()))
+            })
             .collect()
     }
 }
@@ -391,8 +404,8 @@ impl Okapi {
 }
 
 const LUCENE_STOP: &[&str] = &[
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the",
-    "their", "then", "there", "these", "they", "this", "to", "was", "will", "with",
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such",
+    "that", "the", "their", "then", "there", "these", "they", "this", "to", "was", "will", "with",
 ];
 
 /// Lucene-style analyzer: lowercase, split on non-alphanumerics, English stop set, Snowball English stemmer.
@@ -493,10 +506,18 @@ impl Shared {
 enum Index {
     Okapi(Okapi),
     Bm25(Bm25),
-    Dense { docs: Vec<Vec<f32>>, e5: bool },
+    Dense {
+        docs: Vec<Vec<f32>>,
+        e5: bool,
+    },
     Hybrid(Bm25, Vec<Vec<f32>>),
     /// `ids` maps memory id → unit indices (several when the write path merged duplicates)
-    Engine { engine: Box<Engine>, ids: HashMap<String, Vec<usize>>, mode: EngineMode, stats: Value },
+    Engine {
+        engine: Box<Engine>,
+        ids: HashMap<String, Vec<usize>>,
+        mode: EngineMode,
+        stats: Value,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -627,7 +648,10 @@ async fn search(ix: &Index, q: &str, sh: &Shared, n: usize) -> Result<(Vec<usize
                 let (k, depth) = if *mode == EngineMode::TopK { (TOPK_K, Depth::TopK) } else { (RECALL_K, Depth::Adaptive) };
                 let out = engine.recall(&Ctx::default(), RecallReq { query: q.to_string(), k, depth, ..Default::default() }).await?;
                 let via: Vec<String> = out.notes.iter().map(|h| h.via.clone()).collect();
-                (out.notes.iter().map(|h| h.id.clone()).collect(), json!({"returned": out.notes.len(), "mode": out.mode, "sufficient": out.sufficient, "via": via}))
+                (
+                    out.notes.iter().map(|h| h.id.clone()).collect(),
+                    json!({"returned": out.notes.len(), "mode": out.mode, "sufficient": out.sufficient, "via": via}),
+                )
             };
             let mut seen = HashSet::new();
             let mut r = vec![];
@@ -688,7 +712,8 @@ fn metrics(rank: &[usize], corpus: &Corpus, case: &Case, dataset: &str, gran: &s
             // with the official `noans_` relabelling; `session_true` uses the real session ids instead.
             for real in [false, true] {
                 let groups: Vec<&str> = corpus.units.iter().map(|u| if real { u.group.as_str() } else { u.ogroup.as_str() }).collect();
-                let gold_s: HashSet<&str> = corpus.units.iter().zip(&groups).filter(|(u, _)| gold.contains(u.id.as_str())).map(|(_, g)| *g).collect();
+                let gold_s: HashSet<&str> =
+                    corpus.units.iter().zip(&groups).filter(|(u, _)| gold.contains(u.id.as_str())).map(|(_, g)| *g).collect();
                 let mut ek = k;
                 let uniq = |ek: usize| rank.iter().take(ek).map(|&i| groups[i]).collect::<HashSet<_>>().len();
                 while ek <= groups.len() && uniq(ek) < k {
@@ -725,7 +750,12 @@ fn run_path(cache: &Path, dataset: &str, gran: &str, sys: &str) -> PathBuf {
 
 fn done_set(p: &Path) -> HashSet<String> {
     let Ok(f) = std::fs::File::open(p) else { return HashSet::new() };
-    std::io::BufReader::new(f).lines().map_while(|l| l.ok()).filter_map(|l| serde_json::from_str::<Value>(&l).ok()).filter_map(|v| v["qid"].as_str().map(String::from)).collect()
+    std::io::BufReader::new(f)
+        .lines()
+        .map_while(|l| l.ok())
+        .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
+        .filter_map(|v| v["qid"].as_str().map(String::from))
+        .collect()
 }
 
 fn load(cache: &Path, dataset: &str, gran: &str, all: bool) -> Result<(Vec<Corpus>, Value)> {
@@ -782,7 +812,12 @@ async fn cmd_run(cache: &Path, dataset: &str, gran: &str, systems: &[String], bu
     let t0 = Instant::now();
     let (corpora, info) = load(cache, dataset, gran, false)?;
     let sh = shared_for(cache, dataset, gran, systems)?;
-    eprintln!("loaded {dataset}/{gran}: {} corpora, {} cases ({info}) in {:.1}s", corpora.len(), corpora.iter().map(|c| c.cases.len()).sum::<usize>(), t0.elapsed().as_secs_f64());
+    eprintln!(
+        "loaded {dataset}/{gran}: {} corpora, {} cases ({info}) in {:.1}s",
+        corpora.len(),
+        corpora.iter().map(|c| c.cases.len()).sum::<usize>(),
+        t0.elapsed().as_secs_f64()
+    );
     std::fs::create_dir_all(runs_dir(cache))?;
     let mut n_cases = 0;
     'outer: for sys in systems {
@@ -840,7 +875,10 @@ fn mean(v: &[f64]) -> f64 {
 
 fn cmd_report(cache: &Path, out: &Path, split: &str) -> Result<()> {
     std::fs::create_dir_all(out)?;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(runs_dir(cache))?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(runs_dir(cache))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .collect();
     files.sort();
     let mut all: BTreeMap<String, Value> = BTreeMap::new();
     for f in &files {
@@ -923,9 +961,21 @@ fn cmd_report(cache: &Path, out: &Path, split: &str) -> Result<()> {
     }
     // markdown tables
     let mut md = String::new();
-    let g = |e: &Value, grp: &str, key: &str| -> String { e["groups"][grp][key].as_f64().map(|x| format!("{x:.3}")).unwrap_or("–".into()) };
+    let g =
+        |e: &Value, grp: &str, key: &str| -> String { e["groups"][grp][key].as_f64().map(|x| format!("{x:.3}")).unwrap_or("–".into()) };
     let order = [
-        "bm25-okapi-ref", "bm25", "hash-dense", "e5-small", "hybrid-rrf", "unimem-prior-hash", "unimem-prior-e5", "unimem-topk-hash", "unimem-topk-e5", "unimem-hash", "unimem-e5", "unimem-write-hash",
+        "bm25-okapi-ref",
+        "bm25",
+        "hash-dense",
+        "e5-small",
+        "hybrid-rrf",
+        "unimem-prior-hash",
+        "unimem-prior-e5",
+        "unimem-topk-hash",
+        "unimem-topk-e5",
+        "unimem-hash",
+        "unimem-e5",
+        "unimem-write-hash",
         "unimem-write-e5",
     ];
     let sorted = |ds: &str, gran: &str| -> Vec<&Value> {
@@ -956,11 +1006,22 @@ fn cmd_report(cache: &Path, out: &Path, split: &str) -> Result<()> {
                     md.push_str(&format!(" {} |", g(e, "overall", &format!("{l}/{k}"))));
                 }
             }
-            md.push_str(&format!(" {} | {} |\n", e["notes_returned_mean"].as_f64().map(|x| format!("{x:.2}")).unwrap_or("all".into()), e["search_ms_mean"]));
+            md.push_str(&format!(
+                " {} | {} |\n",
+                e["notes_returned_mean"].as_f64().map(|x| format!("{x:.2}")).unwrap_or("all".into()),
+                e["search_ms_mean"]
+            ));
         }
         let lvl = if gran == "turn" { "turn" } else { "session" };
         md.push_str(&format!("\nPer question type, {lvl}-level R_all@10 (n per type in header):\n\n"));
-        let types = ["single-session-user", "single-session-assistant", "single-session-preference", "multi-session", "temporal-reasoning", "knowledge-update"];
+        let types = [
+            "single-session-user",
+            "single-session-assistant",
+            "single-session-preference",
+            "multi-session",
+            "temporal-reasoning",
+            "knowledge-update",
+        ];
         md.push_str("| system |");
         for t in types {
             md.push_str(&format!(" {t} ({}) |", rows[0]["groups"][t]["n"]));
@@ -1094,7 +1155,8 @@ async fn main() -> Result<()> {
         "run" => {
             let dataset = arg(&args, "--dataset").unwrap_or("lme".into());
             let gran = arg(&args, "--gran").unwrap_or("turn".into());
-            let systems: Vec<String> = arg(&args, "--systems").unwrap_or("bm25-okapi-ref,bm25,e5-small,hybrid-rrf".into()).split(',').map(String::from).collect();
+            let systems: Vec<String> =
+                arg(&args, "--systems").unwrap_or("bm25-okapi-ref,bm25,e5-small,hybrid-rrf".into()).split(',').map(String::from).collect();
             let budget: f64 = arg(&args, "--budget").and_then(|b| b.parse().ok()).unwrap_or(f64::MAX);
             let limit: usize = arg(&args, "--limit").and_then(|b| b.parse().ok()).unwrap_or(usize::MAX);
             cmd_run(&cache, &dataset, &gran, &systems, budget, limit).await
@@ -1117,7 +1179,11 @@ async fn main() -> Result<()> {
             let out = PathBuf::from(arg(&args, "--out").unwrap_or(format!("{dataset}-{gran}-{sys}.retrieval.jsonl")));
             cmd_dump(&cache, &dataset, &gran, &sys, k, &out).await
         }
-        "report" => cmd_report(&cache, &PathBuf::from(arg(&args, "--out").unwrap_or("bench/std/results".into())), &arg(&args, "--split").unwrap_or("all".into())),
+        "report" => cmd_report(
+            &cache,
+            &PathBuf::from(arg(&args, "--out").unwrap_or("bench/std/results".into())),
+            &arg(&args, "--split").unwrap_or("all".into()),
+        ),
         "evidence" => {
             let dataset = arg(&args, "--dataset").unwrap_or("lme".into());
             let gran = arg(&args, "--gran").unwrap_or("turn".into());

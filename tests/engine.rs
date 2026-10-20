@@ -60,13 +60,27 @@ async fn write_scope_dedupe_supersede_recall() {
     assert!(matches!(r, WriteOutcome::Rejected { .. }), "{r:?}");
 
     // supersede: changed number
-    let WriteOutcome::Stored { id: old, .. } = e.write(&ca, w("The alpha month-end job runs at 21:00 on the warehouse")).await.unwrap() else { panic!() };
-    let r = e.write(&ca, WriteReq { content: "The alpha month-end job runs at 22:00 on the warehouse".into(), why: Some("the warehouse was downsized to Medium".into()), ..Default::default() }).await.unwrap();
+    let WriteOutcome::Stored { id: old, .. } = e.write(&ca, w("The alpha month-end job runs at 21:00 on the warehouse")).await.unwrap()
+    else {
+        panic!()
+    };
+    let r = e
+        .write(
+            &ca,
+            WriteReq {
+                content: "The alpha month-end job runs at 22:00 on the warehouse".into(),
+                why: Some("the warehouse was downsized to Medium".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let WriteOutcome::Stored { superseded, .. } = r else { panic!("{r:?}") };
     assert_eq!(superseded, vec![old.clone()]);
 
     // recall from another harness in another project sees global, not alpha's project notes
-    let out = e.recall(&cb, RecallReq { query: "how should replies be written, language?".into(), k: 5, ..Default::default() }).await.unwrap();
+    let out =
+        e.recall(&cb, RecallReq { query: "how should replies be written, language?".into(), k: 5, ..Default::default() }).await.unwrap();
     assert!(out.notes.iter().any(|n| n.content.contains("Chinese")), "{out:?}");
     assert!(out.notes.iter().all(|n| !n.content.contains("deploy.sh")));
 
@@ -87,7 +101,17 @@ async fn write_scope_dedupe_supersede_recall() {
     assert!(out.notes.is_empty());
 
     // explicit scope by project name from elsewhere
-    let r = e.write(&cb, WriteReq { content: "alpha's CI uses GitHub Actions with a macOS runner".into(), scope: Some("alpha".into()), ..Default::default() }).await.unwrap();
+    let r = e
+        .write(
+            &cb,
+            WriteReq {
+                content: "alpha's CI uses GitHub Actions with a macOS runner".into(),
+                scope: Some("alpha".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let WriteOutcome::Stored { scope, .. } = r else { panic!("{r:?}") };
     assert_eq!(scope, "project:github.com/me/alpha");
 

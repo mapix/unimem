@@ -55,7 +55,9 @@ async fn mock_handler(State(m): State<Arc<Mock>>, req: Request) -> Response {
     let reply = m.script.lock().pop_front().unwrap_or_else(|| Reply::Json(completion("d", text_msg("ok"), "stop", 1, 1)));
     match reply {
         Reply::Json(v) => Response::builder().header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
-        Reply::Status(s, v) => Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+        Reply::Status(s, v) => {
+            Response::builder().status(s).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap()
+        }
         Reply::Sse(chunks) => {
             let mut s = String::new();
             for c in chunks {
@@ -87,7 +89,12 @@ async fn env(script: Vec<Reply>) -> Env {
     let up = serve(Router::new().route("/v1/chat/completions", post(mock_handler)).with_state(mock.clone())).await;
     let mut cfg = Config::default();
     cfg.upstream.openai = up;
-    let engine = Arc::new(Engine::with_parts(cfg, Store::open_memory().unwrap(), Box::new(HashEmbedder { dim: 512 }), ChainDecider::new(vec![Box::new(HeuristicDecider)])));
+    let engine = Arc::new(Engine::with_parts(
+        cfg,
+        Store::open_memory().unwrap(),
+        Box::new(HashEmbedder { dim: 512 }),
+        ChainDecider::new(vec![Box::new(HeuristicDecider)]),
+    ));
     let state = Arc::new(AppState { engine: engine.clone(), client: reqwest::Client::new() });
     let gw = serve(gateway::router(state)).await;
     Env { mock, gw, engine, client: reqwest::Client::new() }
@@ -135,7 +142,11 @@ fn sse_script(id: &str, text: &str, calls: Vec<(&str, &str, Value)>, finish: &st
         v.push(chunk(id, json!({"content":b}), Value::Null));
     }
     for (i, (cid, name, args)) in calls.iter().enumerate() {
-        v.push(chunk(id, json!({"tool_calls":[{"index":i,"id":cid,"type":"function","function":{"name":name,"arguments":""}}]}), Value::Null));
+        v.push(chunk(
+            id,
+            json!({"tool_calls":[{"index":i,"id":cid,"type":"function","function":{"name":name,"arguments":""}}]}),
+            Value::Null,
+        ));
         let s = args.to_string();
         let (a, b) = s.split_at(s.len() / 2);
         for d in [a, b] {
@@ -198,7 +209,8 @@ impl Stream {
                         calls.push(json!({"id":tc["id"],"type":"function","function":{"name":tc["function"]["name"],"arguments":""}}));
                     }
                     assert!(i < calls.len(), "tool call indices contiguous");
-                    let a = calls[i]["function"]["arguments"].as_str().unwrap().to_string() + tc["function"]["arguments"].as_str().unwrap_or("");
+                    let a = calls[i]["function"]["arguments"].as_str().unwrap().to_string()
+                        + tc["function"]["arguments"].as_str().unwrap_or("");
                     calls[i]["function"]["arguments"] = json!(a);
                 }
             }
@@ -263,7 +275,8 @@ async fn stream_intercepts_merges_and_expands_next_request() {
     assert!(e.engine.store.count_memories().values().sum::<i64>() >= 1);
 
     // next request echoes the merged message
-    let req2 = agent_req(json!([sys(), u1, {"role":"assistant","content": text}, {"role":"user","content":"thanks, now run the tests"}]), false);
+    let req2 =
+        agent_req(json!([sys(), u1, {"role":"assistant","content": text}, {"role":"user","content":"thanks, now run the tests"}]), false);
     assert!(e.post(&req2).await.status().is_success());
     let seen = e.seen();
     let b3 = seen[2].body();
@@ -318,7 +331,14 @@ async fn non_stream_merges_rounds_and_sums_usage() {
 #[tokio::test]
 async fn mixed_turn_hands_harness_calls_and_replays_hidden_results() {
     let e = env(vec![
-        sse_script("x1", "Looking.", vec![("call_mem", "unimem_recall", json!({"query":"tests"})), ("call_sh", "bash", json!({"command":"cargo test"}))], "tool_calls", 50, 20),
+        sse_script(
+            "x1",
+            "Looking.",
+            vec![("call_mem", "unimem_recall", json!({"query":"tests"})), ("call_sh", "bash", json!({"command":"cargo test"}))],
+            "tool_calls",
+            50,
+            20,
+        ),
         Reply::Json(completion("x2", text_msg("done"), "stop", 1, 1)),
     ])
     .await;
@@ -350,7 +370,15 @@ async fn mixed_turn_hands_harness_calls_and_replays_hidden_results() {
 async fn requests_without_tools_pass_through_byte_identical() {
     let e = env(vec![Reply::Json(completion("t", text_msg("Title"), "stop", 1, 1))]).await;
     let raw = r#"{"model":"gpt-x",  "messages":[{"role":"user","content":"title for: fix bug"}]}"#;
-    let r = e.client.post(format!("{}/v1/chat/completions", e.gw)).header("authorization", "Bearer k").header("content-type", "application/json").body(raw).send().await.unwrap();
+    let r = e
+        .client
+        .post(format!("{}/v1/chat/completions", e.gw))
+        .header("authorization", "Bearer k")
+        .header("content-type", "application/json")
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
     assert!(r.status().is_success());
     assert_eq!(r.json::<Value>().await.unwrap()["choices"][0]["message"]["content"], "Title");
     assert_eq!(e.seen()[0].raw.as_ref(), raw.as_bytes());

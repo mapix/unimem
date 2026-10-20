@@ -213,7 +213,14 @@ impl Store {
         self.conn
             .lock()
             .query_row("SELECT key,pid,harness,cwd,first_seen,last_seen FROM sessions WHERE key=?", [key], |r| {
-                Ok(super::SessionRow { key: r.get(0)?, pid: r.get(1)?, harness: r.get(2)?, cwd: r.get(3)?, first_seen: r.get(4)?, last_seen: r.get(5)? })
+                Ok(super::SessionRow {
+                    key: r.get(0)?,
+                    pid: r.get(1)?,
+                    harness: r.get(2)?,
+                    cwd: r.get(3)?,
+                    first_seen: r.get(4)?,
+                    last_seen: r.get(5)?,
+                })
             })
             .optional()
             .ok()

@@ -212,13 +212,7 @@ impl Default for JevCfg {
 }
 impl Default for LlmCfg {
     fn default() -> Self {
-        Self {
-            base_url: String::new(),
-            api_key_env: "UNIMEM_LLM_API_KEY".into(),
-            api_key: None,
-            model: String::new(),
-            timeout_ms: 15000,
-        }
+        Self { base_url: String::new(), api_key_env: "UNIMEM_LLM_API_KEY".into(), api_key: None, model: String::new(), timeout_ms: 15000 }
     }
 }
 impl Default for EmbedderCfg {
@@ -268,8 +262,7 @@ impl Config {
     pub fn load(path: Option<&std::path::Path>) -> anyhow::Result<Self> {
         let p = path.map(PathBuf::from).unwrap_or_else(Self::default_path);
         let mut cfg: Config = if p.exists() {
-            toml::from_str(&std::fs::read_to_string(&p)?)
-                .map_err(|e| anyhow::anyhow!("invalid config {}: {e}", p.display()))?
+            toml::from_str(&std::fs::read_to_string(&p)?).map_err(|e| anyhow::anyhow!("invalid config {}: {e}", p.display()))?
         } else {
             Config::default()
         };

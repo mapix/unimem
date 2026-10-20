@@ -57,8 +57,9 @@ use tokio::sync::mpsc;
 
 use super::turn::{self, Live, Turn as MemTurn};
 use super::{
-    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
-    response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage,
+    record_turn, relay, response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo,
+    Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -69,7 +70,8 @@ pub const K_ITEMS: &str = "expand_items";
 pub const K_AUG: &str = "augment_user";
 
 /// Item types the harness executes (anything else with a call shape is server-side, e.g. web_search_call).
-const HARNESS_CALLS: &[&str] = &["function_call", "custom_tool_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_approval_request"];
+const HARNESS_CALLS: &[&str] =
+    &["function_call", "custom_tool_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_approval_request"];
 
 // ================================================================ item helpers
 
@@ -232,7 +234,12 @@ fn req_info(headers: &HeaderMap, body: &Value, input: &[Value]) -> ReqInfo {
         .or_else(|| body.get("prompt_cache_key").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from))
         .unwrap_or_else(|| format!("h:{}", hash_hex(&[&harness, &first_user])));
     // Latest context first (Codex re-sends <environment_context> when the cwd changes), then instructions.
-    let mut texts: Vec<String> = input.iter().rev().filter(|i| is_message(i) && st_of(i, "role") != "assistant").flat_map(|i| content_texts(&i["content"])).collect();
+    let mut texts: Vec<String> = input
+        .iter()
+        .rev()
+        .filter(|i| is_message(i) && st_of(i, "role") != "assistant")
+        .flat_map(|i| content_texts(&i["content"]))
+        .collect();
     if let Some(s) = body.get("instructions").and_then(Value::as_str) {
         texts.push(s.to_string());
     }
@@ -329,7 +336,15 @@ fn trailing_outputs(input: &[Value]) -> (String, String) {
         .filter(|i| !is_output(i) && ids.contains(&st_of(i, "call_id")))
         .map(|i| {
             let a = i.get("arguments").and_then(Value::as_str).unwrap_or("");
-            serde_json::from_str::<Value>(a).ok().and_then(|v| v.get("command").map(|c| match c { Value::Array(x) => x.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "), c => c.as_str().unwrap_or("").to_string() })).unwrap_or_else(|| a.to_string())
+            serde_json::from_str::<Value>(a)
+                .ok()
+                .and_then(|v| {
+                    v.get("command").map(|c| match c {
+                        Value::Array(x) => x.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "),
+                        c => c.as_str().unwrap_or("").to_string(),
+                    })
+                })
+                .unwrap_or_else(|| a.to_string())
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -470,7 +485,11 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let cfg_up = &st.engine.cfg.upstream;
     let chatgpt = parts.headers.contains_key("chatgpt-account-id") || parts.uri.path().starts_with("/backend-api/");
-    let url = if chatgpt { join_url(&cfg_up.chatgpt, "/responses", parts.uri.query()) } else { join_url(&cfg_up.openai, "/v1/responses", parts.uri.query()) };
+    let url = if chatgpt {
+        join_url(&cfg_up.chatgpt, "/responses", parts.uri.query())
+    } else {
+        join_url(&cfg_up.openai, "/v1/responses", parts.uri.query())
+    };
     let bytes = match axum::body::to_bytes(body, MAX_BODY).await {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
@@ -508,7 +527,10 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     let first_hash = first_user.map(item_key).unwrap_or_default();
     let summary_key = orig
         .iter()
-        .find(|i| turn::SUMMARY_ITEM_TYPES.contains(&ty(i)) || is_message(i) && content_texts(&i["content"]).iter().any(|t| turn::has_summary_marker(t)))
+        .find(|i| {
+            turn::SUMMARY_ITEM_TYPES.contains(&ty(i))
+                || is_message(i) && content_texts(&i["content"]).iter().any(|t| turn::has_summary_marker(t))
+        })
         .map(item_key);
     let n_orig = orig.len();
     let rp = replay(&st, &info.session, orig, !chained);
@@ -519,7 +541,14 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
         inject_tools(&mut body);
     }
     let model = body["model"].as_str().unwrap_or("").to_string();
-    let live = Live::scan(&json!({"instructions": body["instructions"], "tools": body["tools"], "input": input}), rp.anchors.clone(), n_orig, first_hash, summary_key).with_hidden(&rp.hidden);
+    let live = Live::scan(
+        &json!({"instructions": body["instructions"], "tools": body["tools"], "input": input}),
+        rp.anchors.clone(),
+        n_orig,
+        first_hash,
+        summary_key,
+    )
+    .with_hidden(&rp.hidden);
     let mut tn = MemTurn::begin(&st, &ctx, live, &model, "");
     if let Some(last_key) = keys.last() {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };

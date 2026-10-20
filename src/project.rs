@@ -125,8 +125,24 @@ pub fn normalize_remote(u: &str) -> String {
 
 /// Files whose presence marks a directory as a project root.
 pub const MANIFESTS: &[&str] = &[
-    "Cargo.toml", "package.json", "pyproject.toml", "setup.py", "setup.cfg", "go.mod", "Package.swift", "pom.xml", "build.gradle",
-    "build.gradle.kts", "Gemfile", "composer.json", "CMakeLists.txt", "mix.exs", "deno.json", "pubspec.yaml", "Makefile", "flake.nix",
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "go.mod",
+    "Package.swift",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "Gemfile",
+    "composer.json",
+    "CMakeLists.txt",
+    "mix.exs",
+    "deno.json",
+    "pubspec.yaml",
+    "Makefile",
+    "flake.nix",
 ];
 
 /// Nearest directory at or above `cwd` that contains a project manifest. The walk stops at (and never returns)
@@ -179,7 +195,15 @@ pub fn read_manifest(root: &Path) -> Manifest {
             m.description = m.description.or(p.and_then(|p| p.get("description")).and_then(|x| x.as_str()).map(String::from));
         }
     }
-    for (f, t) in [("go.mod", "go"), ("Package.swift", "swift"), ("pom.xml", "java"), ("build.gradle", "jvm"), ("Gemfile", "ruby"), ("composer.json", "php"), ("CMakeLists.txt", "c++")] {
+    for (f, t) in [
+        ("go.mod", "go"),
+        ("Package.swift", "swift"),
+        ("pom.xml", "java"),
+        ("build.gradle", "jvm"),
+        ("Gemfile", "ruby"),
+        ("composer.json", "php"),
+        ("CMakeLists.txt", "c++"),
+    ] {
         if root.join(f).exists() {
             m.stack.push(t.into());
         }
@@ -206,7 +230,14 @@ fn readme_lead(s: &str) -> String {
             }
             continue;
         }
-        if l.starts_with('#') || l.starts_with('<') || l.starts_with("[![") || l.starts_with("![") || l.starts_with("```") || l.starts_with('|') || l.starts_with("---") {
+        if l.starts_with('#')
+            || l.starts_with('<')
+            || l.starts_with("[![")
+            || l.starts_with("![")
+            || l.starts_with("```")
+            || l.starts_with('|')
+            || l.starts_with("---")
+        {
             if para.len() > 40 {
                 break;
             }
@@ -301,11 +332,7 @@ impl Resolver {
             return None;
         }
         let dir_name = root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        let name = remote
-            .as_ref()
-            .and_then(|r| r.rsplit('/').next().map(String::from))
-            .or(man.name.clone())
-            .unwrap_or(dir_name.clone());
+        let name = remote.as_ref().and_then(|r| r.rsplit('/').next().map(String::from)).or(man.name.clone()).unwrap_or(dir_name.clone());
         let mut aliases = vec![];
         for a in [Some(dir_name), man.name.clone()].into_iter().flatten() {
             if !a.eq_ignore_ascii_case(&name) && !aliases.contains(&a) {
@@ -387,7 +414,11 @@ pub fn names_project(p: &Project, text: &str, entities: &[String]) -> bool {
     let root = Path::new(&p.root);
     entities.iter().any(|e| {
         let e = e.trim_start_matches("./");
-        (e.contains('/') || e.contains('.')) && !e.contains(' ') && !Path::new(e).is_absolute() && !p.root.is_empty() && root.join(e).exists()
+        (e.contains('/') || e.contains('.'))
+            && !e.contains(' ')
+            && !Path::new(e).is_absolute()
+            && !p.root.is_empty()
+            && root.join(e).exists()
     })
 }
 

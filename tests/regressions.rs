@@ -8,7 +8,12 @@ use unimem::engine::{Ctx, Engine, RecallReq, WriteOutcome, WriteReq};
 use unimem::store::Store;
 
 fn engine() -> Engine {
-    Engine::with_parts(Config::default(), Store::open_memory().unwrap(), Box::new(HashEmbedder { dim: 512 }), ChainDecider::new(vec![Box::new(HeuristicDecider)]))
+    Engine::with_parts(
+        Config::default(),
+        Store::open_memory().unwrap(),
+        Box::new(HashEmbedder { dim: 512 }),
+        ChainDecider::new(vec![Box::new(HeuristicDecider)]),
+    )
 }
 
 fn git_project(dir: &std::path::Path, name: &str) -> String {
@@ -150,12 +155,16 @@ async fn recall_sufficiency_and_abstention() {
     stored(&e, &ctx, "wren stores uploaded avatars in the media bucket with a 30 day lifecycle").await;
     stored(&e, &ctx, "Feature flags for wren live in config/flags.yaml and are read at boot").await;
 
-    let out = e.recall(&ctx, RecallReq { query: "how is the wren search index rebuilt?".into(), k: 5, ..Default::default() }).await.unwrap();
+    let out =
+        e.recall(&ctx, RecallReq { query: "how is the wren search index rebuilt?".into(), k: 5, ..Default::default() }).await.unwrap();
     assert!(out.notes.first().is_some_and(|n| n.content.contains("reindex-all")), "{out:?}");
     assert!(out.sufficient, "{out:?}");
 
     // unrelated question: nothing confident, at most two weak candidates, flagged insufficient
-    let out = e.recall(&ctx, RecallReq { query: "which GPU driver version does the render farm need?".into(), k: 5, ..Default::default() }).await.unwrap();
+    let out = e
+        .recall(&ctx, RecallReq { query: "which GPU driver version does the render farm need?".into(), k: 5, ..Default::default() })
+        .await
+        .unwrap();
     assert!(!out.sufficient, "{out:?}");
     assert!(out.notes.len() <= 2, "{out:?}");
 }

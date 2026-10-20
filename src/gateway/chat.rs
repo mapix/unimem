@@ -39,8 +39,9 @@ use tokio::sync::mpsc;
 use super::responses::raw_passthrough;
 use super::turn::{self, Live, Turn as MemTurn};
 use super::{
-    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
-    response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage,
+    record_turn, relay, response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo,
+    Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -154,7 +155,12 @@ fn req_info(headers: &HeaderMap, body: &Value, msgs: &[Value]) -> ReqInfo {
         .or_else(|| header_str(headers, "conversation_id"))
         .or_else(|| body.get("prompt_cache_key").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from))
         .unwrap_or_else(|| format!("h:{}", hash_hex(&[&harness, &first_user])));
-    let ctx_texts: Vec<String> = msgs.iter().filter(|m| matches!(role(m), "system" | "developer")).flat_map(|m| texts(&m["content"])).chain(std::iter::once(first_user)).collect();
+    let ctx_texts: Vec<String> = msgs
+        .iter()
+        .filter(|m| matches!(role(m), "system" | "developer"))
+        .flat_map(|m| texts(&m["content"]))
+        .chain(std::iter::once(first_user))
+        .collect();
     let refs: Vec<&str> = ctx_texts.iter().map(String::as_str).collect();
     ReqInfo { harness, session, cwd: find_cwd(&refs) }
 }
@@ -355,7 +361,12 @@ fn finalize(st: &AppState, t: &Turn, mut rounds: Vec<RoundRec>) -> Value {
         messages.push(upstream_msg(&r.msg));
         messages.extend(r.results.iter().cloned());
     }
-    if let Err(e) = st.engine.store.put_overlay(&expand_anchor(&t.ctx.session, prev, &vis), &t.ctx.session, K_EXPAND, &json!({"v": 1, "messages": messages})) {
+    if let Err(e) = st.engine.store.put_overlay(
+        &expand_anchor(&t.ctx.session, prev, &vis),
+        &t.ctx.session,
+        K_EXPAND,
+        &json!({"v": 1, "messages": messages}),
+    ) {
         tracing::warn!("storing expansion overlay failed: {e}");
     }
     visible
@@ -414,7 +425,8 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
         inject_tools(&mut body);
     }
     let model = body["model"].as_str().unwrap_or("").to_string();
-    let live = Live::scan(&json!({"tools": body["tools"], "messages": messages}), anchors, n_orig, first_hash, summary_key).with_hidden(&hidden);
+    let live =
+        Live::scan(&json!({"tools": body["tools"], "messages": messages}), anchors, n_orig, first_hash, summary_key).with_hidden(&hidden);
     let mut tn = MemTurn::begin(&st, &ctx, live, &model, "");
     if let Some(last_key) = keys.last() {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };
@@ -678,7 +690,10 @@ impl Pump {
                                     Some(self.next_out - 1)
                                 };
                                 r.map.insert(up, o);
-                                r.calls.push((up, json!({"id": e["id"], "type": "function", "function": {"name": call_name(&e), "arguments": ""}})));
+                                r.calls.push((
+                                    up,
+                                    json!({"id": e["id"], "type": "function", "function": {"name": call_name(&e), "arguments": ""}}),
+                                ));
                                 o
                             }
                         };

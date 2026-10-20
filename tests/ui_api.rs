@@ -52,7 +52,13 @@ impl Env {
     }
     async fn find(&self, needle: &str) -> Value {
         let all = self.get("/ui/api/memories?include_superseded=true&limit=2000").await;
-        all["items"].as_array().unwrap().iter().find(|m| m["content"].as_str().unwrap().contains(needle)).cloned().unwrap_or_else(|| panic!("no memory containing {needle}"))
+        all["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["content"].as_str().unwrap().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("no memory containing {needle}"))
     }
 }
 
@@ -110,7 +116,11 @@ async fn memories_filters_and_search() {
 
     // scope by project name, several kinds, harness
     let p = e.get("/ui/api/memories?scope=payments-api&kind=gotcha,procedure").await;
-    assert!(p["items"].as_array().unwrap().iter().all(|m| m["scope_label"] == "payments-api" && (m["kind"] == "gotcha" || m["kind"] == "procedure")));
+    assert!(p["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|m| m["scope_label"] == "payments-api" && (m["kind"] == "gotcha" || m["kind"] == "procedure")));
     assert_eq!(p["total"], 4);
     let h = e.get("/ui/api/memories?harness=cursor").await;
     assert!(h["total"].as_u64().unwrap() >= 1 && h["items"].as_array().unwrap().iter().all(|m| m["source"]["harness"] == "cursor"));
@@ -141,7 +151,8 @@ async fn memory_detail_has_neighbors_chain_and_source() {
     let chain: Vec<&str> = d["chain"].as_array().unwrap().iter().map(|c| c["content"].as_str().unwrap()).collect();
     assert_eq!(chain.len(), 3, "{chain:?}");
     assert!(chain[0].contains("Redis with a 24h TTL") && chain[2].contains("kept 72h"), "oldest → newest: {chain:?}");
-    let rels: Vec<(String, String)> = d["neighbors"].as_array().unwrap().iter().map(|n| (n["rel"].as_str().unwrap().into(), n["dir"].as_str().unwrap().into())).collect();
+    let rels: Vec<(String, String)> =
+        d["neighbors"].as_array().unwrap().iter().map(|n| (n["rel"].as_str().unwrap().into(), n["dir"].as_str().unwrap().into())).collect();
     assert!(rels.contains(&("supersedes".into(), "out".into())) && rels.contains(&("supersedes".into(), "in".into())), "{rels:?}");
     assert!(rels.iter().any(|r| r.0 == "causal"), "{rels:?}");
     assert_eq!(d["source"]["harness"], "claude-code");
@@ -176,7 +187,9 @@ async fn patch_and_delete_memory() {
     // rejected edits
     let (s, _) = e.send(reqwest::Method::PATCH, &url, Some(json!({"content": "short"}))).await;
     assert_eq!(s, 400);
-    let (s, _) = e.send(reqwest::Method::PATCH, &url, Some(json!({"content": "the deploy key is sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"}))).await;
+    let (s, _) = e
+        .send(reqwest::Method::PATCH, &url, Some(json!({"content": "the deploy key is sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"})))
+        .await;
     assert_eq!(s, 400);
 
     // change scope by project name
@@ -212,7 +225,13 @@ async fn projects_list_and_patch() {
     assert!(p["global"]["counts"]["live"].as_i64().unwrap() >= 9);
 
     let pid = pay["card"]["pid"].as_str().unwrap();
-    let (s, r) = e.send(reqwest::Method::PATCH, &format!("/ui/api/projects/{pid}"), Some(json!({"summary": "Card payments service.", "stack": "rust, axum, postgres"}))).await;
+    let (s, r) = e
+        .send(
+            reqwest::Method::PATCH,
+            &format!("/ui/api/projects/{pid}"),
+            Some(json!({"summary": "Card payments service.", "stack": "rust, axum, postgres"})),
+        )
+        .await;
     assert_eq!(s, 200, "{r}");
     assert_eq!(r["card"]["summary"], "Card payments service.");
     let card = e.engine.store.get_project(pid).unwrap();
@@ -274,7 +293,13 @@ async fn traces_list() {
 #[tokio::test]
 async fn recall_playground_shows_injection() {
     let e = env().await;
-    let (s, r) = e.send(reqwest::Method::POST, "/ui/api/recall", Some(json!({"query": "why did we stop storing idempotency keys in redis?", "project": "payments-api"}))).await;
+    let (s, r) = e
+        .send(
+            reqwest::Method::POST,
+            "/ui/api/recall",
+            Some(json!({"query": "why did we stop storing idempotency keys in redis?", "project": "payments-api"})),
+        )
+        .await;
     assert_eq!(s, 200, "{r}");
     let notes = r["out"]["notes"].as_array().unwrap();
     assert!(!notes.is_empty());
@@ -290,7 +315,13 @@ async fn recall_playground_shows_injection() {
 
     // a working directory resolves the project the same way the gateway does
     let cwd = e.engine.store.get_project(&pid_of(&e, "tern")).unwrap().root;
-    let (_, r) = e.send(reqwest::Method::POST, "/ui/api/recall", Some(json!({"query": "how do I backfill a partition in tern?", "cwd": cwd, "passive": false}))).await;
+    let (_, r) = e
+        .send(
+            reqwest::Method::POST,
+            "/ui/api/recall",
+            Some(json!({"query": "how do I backfill a partition in tern?", "cwd": cwd, "passive": false})),
+        )
+        .await;
     assert_eq!(r["project"]["name"], "tern");
     assert_eq!(r["passive"], false);
 
