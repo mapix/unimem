@@ -455,16 +455,17 @@ Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Citation
 
-A technical report (in Chinese, covering v0.3) is in [docs/paper.md](docs/paper.md) / [docs/paper.pdf](docs/paper.pdf).
+The paper (English, covering v0.5) is at [docs/paper/unimem.pdf](docs/paper/unimem.pdf); the LaTeX source is
+[docs/paper/unimem.tex](docs/paper/unimem.tex).
 
 ```bibtex
 @techreport{unimem2026,
-  title       = {unimem: A Gateway-Based Unified Memory Layer for Heterogeneous Coding Agents},
+  title       = {unimem: A Harness-Agnostic Memory Gateway for Coding Agents},
   author      = {mapix},
   year        = {2026},
   institution = {GitHub},
   url         = {https://github.com/mapix/unimem},
-  note        = {Technical report, v0.3}
+  note        = {Technical report, v0.5}
 }
 ```
 
