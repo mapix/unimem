@@ -1,9 +1,16 @@
 [package]
 name = "unimem"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 description = "Harness-agnostic unified memory: a local LLM gateway that gives every coding agent one shared, project-aware long-term memory."
 license = "MIT"
+authors = ["mapix"]
+repository = "https://github.com/mapix/unimem"
+homepage = "https://github.com/mapix/unimem"
+readme = "README.md"
+keywords = ["llm", "memory", "agents", "gateway", "mcp"]
+categories = ["command-line-utilities", "development-tools", "web-programming::http-server"]
+exclude = ["bench/data/*.json", "bench/results/", "bench/std/results/", "docs/paper.pdf", "docs/images/"]
 
 [[bin]]
 name = "unimem"

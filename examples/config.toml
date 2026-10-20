@@ -1,0 +1,94 @@
+# unimem configuration: copy to ~/.unimem/config.toml (or point --config / $UNIMEM_CONFIG at it).
+#
+# Every field is optional. The values below are the built-in defaults, so an empty file (or no file)
+# behaves exactly like this one: fully offline, with the heuristic decider and the hash embedder.
+# Environment overrides: UNIMEM_CONFIG, UNIMEM_DATA_DIR, UNIMEM_LISTEN. Logging: RUST_LOG=unimem=debug.
+#
+# API keys never go in this file. Each backend reads its key from the env var named by `api_key_env`.
+
+listen   = "127.0.0.1:4777"     # keep this on loopback: the gateway, /mcp and /ui have no authentication
+data_dir = "~/.unimem"          # unimem.db lives here
+
+[upstream]
+anthropic    = "https://api.anthropic.com"               # /v1/messages (Claude Code)
+openai       = "https://api.openai.com"                  # Responses / Chat Completions with an API key
+chatgpt      = "https://chatgpt.com/backend-api/codex"   # Codex signed in with ChatGPT (chatgpt-account-id header)
+timeout_secs = 600
+
+[inject]
+enabled            = true    # false = pure pass-through recorder (no tools, no recall, no preamble)
+tools              = true    # expose unimem_recall / unimem_remember / unimem_forget / unimem_project
+recall             = true    # passive recall appended to each new user prompt
+preamble           = true    # project card + standing notes on the first user message
+recall_budget_ms   = 1500    # passive recall is skipped if it takes longer than this
+max_recall_notes   = 5
+preamble_max_notes = 8
+max_continuations  = 6       # internal tool rounds per visible response
+record_episodes    = true    # keep a raw episode log (input for the distiller; secrets redacted, 30-day TTL)
+
+# Token budgets (v0.4). `budgets = false` disables every cap below (only for comparisons).
+budgets             = true
+dedup               = true   # don't re-inject a note whose id is still visible in the conversation
+max_inject_tokens   = 1200   # per message (passive recall + hints): min(this, 0.6% of the context window)
+max_preamble_tokens = 1500   # preamble: min(this, 1% of the window)
+max_tool_tokens     = 3000   # one unimem tool result
+max_session_share   = 0.05   # everything unimem keeps live in one conversation; passive recall stops beyond
+
+# Tool-error recall: recall on tool-result turns that show an error.
+tool_recall            = true
+tool_recall_every      = 5    # at most once per this many tool turns of a conversation
+tool_recall_max_tokens = 400
+
+flush_at         = 0.7    # pre-compaction flush: distill + nudge the agent once at this share of the window
+correction_hints = true   # suggest unimem_remember when the user corrects the agent
+
+# Model id prefix -> context window (tokens). Built-in table: claude-* 200k (1M with [1m] / context-1m beta),
+# gpt-5* / codex 272k, o-series 200k, unknown 128k. "*" sets the fallback.
+[inject.context_windows]
+# "claude-sonnet-4" = 1000000
+# "*" = 128000
+
+# System One: the fast typed-decision model. Backends are tried in order, and unavailable ones fall through.
+# "heuristic" is offline and is always appended.
+[decider]
+chain = ["jev", "llm", "heuristic"]
+
+[decider.jev]                      # TypeSafe Jev /v1/systemone (or a compatible local server)
+base_url    = "https://api.typesafe.ai"
+api_key_env = "TYPESAFE_API_KEY"   # the jev backend is only used if this env var is set
+timeout_ms  = 8000
+# model     = "..."
+
+[decider.llm]                      # any OpenAI-compatible /v1/chat/completions model, e.g. Ollama
+base_url    = ""                   # "http://127.0.0.1:11434/v1"
+model       = ""                   # "qwen2.5:7b-instruct"
+api_key_env = "UNIMEM_LLM_API_KEY"
+timeout_ms  = 15000
+
+[embedder]
+kind        = "hash"               # "hash" (offline), "openai" (any /v1/embeddings), "onnx" (build with --features onnx)
+api_key_env = "UNIMEM_EMBED_API_KEY"
+dim         = 512
+# OpenAI-compatible example (Ollama):
+#   kind     = "openai"
+#   base_url = "http://127.0.0.1:11434/v1"
+#   model    = "bge-m3"
+#   dim      = 1024
+# Local ONNX example (folder with model.onnx + tokenizer.json; ONNX Runtime via ORT_DYLIB_PATH):
+#   kind  = "onnx"
+#   model = "~/models/multilingual-e5-small"
+#   dim   = 384
+# Per-embedder calibration (defaults: hash 0.97 / 0.0, e5 0.95 / 0.75):
+#   near_dup_cos = 0.95
+#   cos_baseline = 0.75
+# After changing the embedder, run: unimem reembed
+
+[distill]                          # passive capture: extract memories from idle sessions (off by default)
+enabled     = false
+base_url    = ""                   # OpenAI-compatible; enabled with an empty model = heuristic extractor
+model       = ""
+api_key_env = "UNIMEM_DISTILL_API_KEY"
+idle_secs   = 600                  # distill a session after it has been idle this long
+episode_ttl_days = 30              # episodes older than this are deleted
+min_rate_limit_remaining = 0.1     # skip background work when the upstream rate limit is below this share
+chunk_chars = 24000                # transcript characters per distillation call

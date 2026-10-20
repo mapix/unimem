@@ -1,0 +1,68 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Redact API keys, tokens and private memory content** before pasting logs.
+        For security issues, use a private advisory instead: https://github.com/mapix/unimem/security/advisories/new
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. unimem serve
+        2. ANTHROPIC_BASE_URL=http://127.0.0.1:4777 claude
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: unimem version
+      description: Output of `unimem --version` (or the git commit)
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options:
+        - Claude Code
+        - Codex CLI
+        - Other Anthropic-compatible client
+        - Other OpenAI-compatible client (Responses / Chat)
+        - MCP only
+        - CLI / web UI only
+    validations:
+      required: true
+  - type: input
+    id: harness_version
+    attributes:
+      label: Harness version and auth mode
+      placeholder: "e.g. Claude Code 2.x with subscription OAuth; Codex 0.x with ChatGPT login"
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "e.g. macOS 15.1 arm64"
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: Non-default parts of ~/.unimem/config.toml (no keys)
+      render: toml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output with `RUST_LOG=unimem=debug unimem serve`, and/or `unimem trace -n 50` (redacted)
+      render: text

@@ -1,4 +1,35 @@
+# build output
 /target
+**/*.rs.bk
+
+# local databases (unimem.db, bench temp stores)
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
+
+# benchmark caches and downloads (see bench/std/run_all.sh)
+/bench-cache/
+bench/std/cache/
+bench/std/runs/
+bench/std/data/
+bench/std/emb/
+bench/std/models/
+*.onnx
+*.npy
+__pycache__/
+*.pyc
+.venv/
+
+# local configuration and env
+.env
+.env.*
+/config.toml
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
