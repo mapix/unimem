@@ -12,7 +12,7 @@ they all share one memory. A correction you gave Claude Code in the morning is k
 is filed under the right repository.
 
 > [!WARNING]
-> **unimem is research-grade software (crate v0.4.0, engine v0.5).** It has been tested against mock upstreams and synthetic benchmarks,
+> **unimem is research-grade software (v0.5.0).** It has been tested against mock upstreams and synthetic benchmarks,
 > **not against real Claude Code / Codex traffic over long periods.** Read
 > [Status & known limitations](#status--known-limitations) before routing your daily work through it.
 
