@@ -11,6 +11,9 @@ use std::path::Path;
 
 use crate::util::{now_ts, tokenize};
 
+mod session;
+pub use session::{LedgerEntry, SessionState};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Source {
     pub harness: String,
@@ -145,6 +148,8 @@ pub struct Store {
     conn: Mutex<Connection>,
     vecs: RwLock<HashMap<String, VecEntry>>,
     lex: RwLock<LexIndex>,
+    /// Write-through cache of `session_state` rows (read on every gateway request).
+    sstate: Mutex<HashMap<String, SessionState>>,
 }
 
 const SCHEMA: &str = r#"
@@ -185,6 +190,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE TABLE IF NOT EXISTS traces (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_state (
+  session TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL
 );
 "#;
 
@@ -261,7 +269,8 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
-        let s = Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()) };
+        session::migrate(&conn);
+        let s = Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()), sstate: Mutex::new(HashMap::new()) };
         s.load_vectors()?;
         s.load_lexical()?;
         Ok(s)
@@ -270,7 +279,8 @@ impl Store {
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()) })
+        session::migrate(&conn);
+        Ok(Store { conn: Mutex::new(conn), vecs: RwLock::new(HashMap::new()), lex: RwLock::new(LexIndex::default()), sstate: Mutex::new(HashMap::new()) })
     }
 
     fn load_vectors(&self) -> Result<()> {

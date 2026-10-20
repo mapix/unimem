@@ -765,6 +765,118 @@ pub const KINDS: &[(&str, &str)] = &[
     ("episode", "Something that happened at a point in time (an incident, a result)."),
 ];
 
+// ---------------------------------------------------------------- v0.4 gateway signals
+
+// Authorization / approval language aimed at whoever acts on the note: on the passive path this is never injected.
+re!(agent_authz_re, r"(?ix)(
+    \bauto-?approv | \b(doesn'?t|does\s+not|don'?t|do\s+not|no)\s+need\s+to\s+(be\s+)?(asked|ask|check|confirm|consult)
+  | \bno\s+need\s+to\s+(ask|check|confirm|consult)\b | \bwithout\s+(asking|confirmation|confirming|approval|review)\b
+  | \b(skip|bypass)\s+(the\s+)?(review|approval|confirmation)s?\b | \bpre-?approv | \bstraight\s+away\b[^.\n]{0,40}\bapply\b
+  | (不需要|无需|不用|不必)(再)?(向用户|跟用户|和用户)?(询问|确认|征求|请示|同意|审批) | 自动(批准|确认|同意)
+)");
+
+/// Text that addresses an AI agent or grants it authorization (stricter than the write-time injection screen; used
+/// to keep such notes off the passive injection path).
+pub fn addresses_agent(s: &str) -> bool {
+    addressed_ai_re().is_match(s) || agent_authz_re().is_match(s) || hostile_imperative_re().is_match(s) && ai_mentioned(s)
+}
+
+const REDACTED: &str = "«redacted»";
+
+/// Replace credential-looking spans with «redacted» (episodes are stored only after this). Lines that still look
+/// like they carry a secret after span redaction are dropped whole.
+pub fn redact_secrets(s: &str) -> String {
+    if !has_secret(s) {
+        return s.to_string();
+    }
+    let mut t = secret_re().replace_all(s, REDACTED).into_owned();
+    let mut spans: Vec<(usize, usize)> = vec![];
+    for c in keyed_secret_re().captures_iter(&t) {
+        if let Some(v) = c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)) {
+            if credential_value(v.as_str()) {
+                spans.push((v.start(), v.end()));
+            }
+        }
+    }
+    for m in long_token_re().find_iter(&t) {
+        if high_entropy_token(m.as_str()) {
+            spans.push((m.start(), m.end()));
+        }
+    }
+    spans.sort();
+    let mut out = String::with_capacity(t.len());
+    let mut at = 0;
+    for (a, b) in spans {
+        if a < at {
+            continue;
+        }
+        out.push_str(&t[at..a]);
+        out.push_str(REDACTED);
+        at = b;
+    }
+    out.push_str(&t[at..]);
+    t = out;
+    t.lines().map(|l| if has_secret(l) { REDACTED } else { l }).collect::<Vec<_>>().join("\n")
+}
+
+re!(error_line_re, r"(?ix)(
+    \berror\b | \berr!? | \bfailed\b | \bfailure\b | \bfail(s|ing)?\b | \bpanic(ked)?\b | \btraceback\b | \bexception\b
+  | \bexit\s+(code|status)\s*[:=]?\s*[1-9] | \bE\d{4}\b | ✗ | \bnot\s+found\b | \bpermission\s+denied\b | \bdenied\b
+  | \btimed?\s*out\b | \bsegmentation\s+fault\b | \bundefined\s+reference\b | \bcannot\b | \bcan'?t\s+(find|open|connect)
+  | \bnack\b | \brefused\b | \bunauthori[sz]ed\b | \bfatal\b | 报错 | 错误 | 失败
+)");
+re!(polite_no_re, r"(?i)^\s*no\s+(problem|worries|thanks|rush|need)\b");
+re!(benign_err_re, r"(?i)\b0\s+(failed|errors?)\b|\b(failed|errors?)\s*[:=]\s*0\b");
+re!(path_re, r"(?:[\w.\-]+/)+[\w.\-]+|\b[\w\-]+\.(?:rs|py|ts|tsx|js|go|toml|json|ya?ml|sh|c|h|cpp|java|rb|kt|swift)\b");
+
+/// Error-looking lines of a tool result (first `max_lines`, total ≤ `max_chars`).
+pub fn error_lines(s: &str, max_lines: usize, max_chars: usize) -> Vec<String> {
+    let mut out = vec![];
+    let mut used = 0;
+    for l in s.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        // test-runner summaries like "0 failed" / "failed: 0" are not errors
+        let benign = benign_err_re().is_match(l);
+        if benign || !error_line_re().is_match(l) {
+            continue;
+        }
+        let l = crate::util::truncate_chars(l, 240);
+        used += l.chars().count();
+        if used > max_chars {
+            break;
+        }
+        out.push(l);
+        if out.len() >= max_lines {
+            break;
+        }
+    }
+    out
+}
+
+/// File paths mentioned in `s` (deduplicated, in order).
+pub fn paths_in(s: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    for m in path_re().find_iter(s) {
+        let p = m.as_str().to_string();
+        if !v.contains(&p) && !p.contains("://") {
+            v.push(p);
+        }
+    }
+    v
+}
+
+re!(correction_start_re, r"(?ix)^\s*(no[,.!:\s]|nope\b|wrong\b|actually[,:]|not\s+like\s+that|that'?s\s+not\s+(it|right|what)|stop\b|instead[,:]|不对|不是|错了|别|不要)");
+re!(correction_any_re, r"(?ix)(\bthat'?s\s+(wrong|incorrect|not\s+right)\b|\byou'?re\s+wrong\b|\bdon'?t\s+use\b|\bdo\s+not\s+use\b|\bstop\s+using\b|\bi\s+told\s+you\b|\bwe\s+don'?t\s+do\s+that\b|\bnever\s+use\b|不对|不是这样|别用|不要用|错了|搞错了|说过了|应该用|改成)");
+
+/// The user corrects the agent ("no, …", "that's wrong", "don't use X", "不对", "别用 …").
+pub fn is_correction(s: &str) -> bool {
+    let t = crate::util::strip_harness_noise(s);
+    let t = t.trim();
+    let polite = polite_no_re().is_match(t);
+    // a question ("金额字段应该用什么类型存？") is not a correction unless it opens like one ("no, …?")
+    let question = t.ends_with('?') || t.ends_with('？');
+    !t.is_empty() && !is_ack(t) && !polite && (correction_start_re().is_match(t) || !question && correction_any_re().is_match(t))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

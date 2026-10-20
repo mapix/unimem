@@ -1,7 +1,7 @@
 //! unimem-bench: offline evaluation harness for unimem.
 //!
 //! ```text
-//! unimem-bench [all|e1|e2|e3|e4|summary] [--data <dataset.json>] [--out <results dir>]
+//! unimem-bench [all|e1|e2|e3|e4|e5|summary] [--data <dataset.json>] [--out <results dir>]
 //! ```
 //!
 //! `--data` (default `bench/data/devmem.json`) is the E1 dataset; E2 always uses devmem.json (its scripted
@@ -11,6 +11,8 @@
 //! * E2 gateway overhead + prompt-cache stability + interception correctness against a local mock Anthropic upstream
 //! * E3 project identification on synthetic directory layouts
 //! * E4 engine throughput at 1k / 10k notes
+//! * E5 a 120-request Claude-Code-like session with tool errors and a forced compaction (budgets, de-dup,
+//!   re-injection, tool-error recall, pre-compaction flush)
 //!
 //! Results go to `bench/results/*.json` and `bench/results/SUMMARY.md`.
 //!
@@ -1524,6 +1526,385 @@ async fn e2(root: &Path) -> Result<Value> {
     }))
 }
 
+// ============================================================================ E5 long session
+
+#[derive(Default)]
+struct Mock5 {
+    seen: Mutex<Vec<Value>>,
+    ctr: AtomicU64,
+}
+
+/// E5 upstream: a scripted "model". A prompt or tool result carrying `[[run:<cmd>]]` gets a Bash call; a prompt with
+/// `[[recall]]` gets an `unimem_recall` call (a hidden round); everything else a short answer. Usage reports the
+/// request size (bytes / 4) as input tokens, so the gateway's context tracking sees realistic numbers.
+async fn mock5_handler(State(m): State<Arc<Mock5>>, body: Bytes) -> Response {
+    let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let n = m.ctr.fetch_add(1, Ordering::SeqCst);
+    m.seen.lock().push(v.clone());
+    let last = v["messages"].as_array().and_then(|a| a.last()).cloned().unwrap_or(Value::Null);
+    let blocks = blocks_of(&last["content"]);
+    let text: String = blocks
+        .iter()
+        .map(|b| match b["type"].as_str() {
+            Some("text") => b["text"].as_str().unwrap_or("").to_string(),
+            Some("tool_result") => b["content"].as_str().unwrap_or("").to_string(),
+            _ => String::new(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let ours_result = blocks.iter().any(|b| b["tool_use_id"].as_str().is_some_and(|s| s.starts_with("toolu_um")));
+    let has_ours = v["tools"].as_array().is_some_and(|t| t.iter().any(|x| x["name"] == "unimem_recall"));
+    let (content, stop) = if let Some(cmd) = text.split("[[run:").nth(1).and_then(|r| r.split("]]").next()) {
+        (vec![text_block_e5("Running it."), tool_use(&format!("toolu_e5_{n}"), "Bash", json!({"command": cmd}))], "tool_use")
+    } else if text.contains("[[recall]]") && has_ours && !ours_result {
+        (vec![text_block_e5("Let me check memory."), tool_use(&format!("toolu_um{n}"), "unimem_recall", json!({"query": "ledger-api conventions for tests, deploys and migrations", "k": 8}))], "tool_use")
+    } else {
+        (vec![text_block_e5(&format!("Done (r{n}). {FILLER}"))], "end_turn")
+    };
+    let msg = json!({"id": format!("msg_{n}"), "type":"message","role":"assistant","model":"claude-mock","content":content,"stop_reason":stop,"stop_sequence":null,
+        "usage":{"input_tokens": body.len() / 4, "output_tokens": 60}});
+    Response::builder().header("content-type", "application/json").body(Body::from(msg.to_string())).unwrap()
+}
+
+fn text_block_e5(t: &str) -> Value {
+    json!({"type":"text","text":t})
+}
+
+/// A long, benign tool output (build / test log) of about `chars` characters.
+fn log_output(seed: usize, chars: usize) -> String {
+    let mut s = String::new();
+    let mut i = 0;
+    while s.len() < chars {
+        s.push_str(&format!("tests/unit/test_mod{seed}_{i}.py::test_case_{i} PASSED [{:>3}%]\n", (i * 7) % 100));
+        i += 1;
+    }
+    s.push_str("==== 42 passed in 3.21s ====\n");
+    s
+}
+
+/// Tool error outputs whose root cause is a stored ledger-api note (devmem id).
+const E5_ERRORS: &[(&str, &str, &str)] = &[
+    ("n053", "uv run pytest tests/test_webhooks.py", "FAILED tests/test_webhooks.py::test_stripe_event - stripe.error.SignatureVerificationError: No signatures found matching the expected signature for payload\n  File \"app/billing/webhooks.py\", line 41, in stripe_webhook\n    event = stripe.Webhook.construct_event(payload, sig_header, secret)"),
+    ("n050", "uv run python -m ledger.jobs.invoice_batch --dry-run", "sqlalchemy.exc.TimeoutError: QueuePool limit of size 50 overflow 0 reached, connection timed out, timeout 30.00\npgbouncer: no more connections allowed (max_client_conn) while running ledger.jobs.invoice_batch with AsyncSession"),
+    ("n013", "uv run pytest -m slow", "E   psycopg.OperationalError: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\nFAILED tests/integration/test_invoices.py::test_totals - psycopg.OperationalError\n==== 1 failed, 12 errors in 2.03s ===="),
+    ("n014", "make dev", "uvicorn: ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8000): address already in use\nmake: *** [dev] Error 1"),
+    ("n123", "uv run python -m ledger.jobs.invoice_batch", "invoice_batch ERROR: priced 312 multi-currency invoices with stale ECB FX rates (rates dated yesterday); FX import had not landed yet"),
+    ("n126", "uv run alembic check", "alembic ERROR: autogenerate did not detect the server_default change on invoices.status; migration 0042 is incomplete\nFAILED: Target database is not up to date."),
+];
+
+/// Facts the user states during the session (new: not in the store). The pre-compaction flush should capture them.
+const E5_PLANTED: &[(&str, &str)] = &[
+    ("Remember that the staging database snapshot job runs at 04:30 UTC and takes about 20 minutes.", "04:30"),
+    ("Remember: the invoice PDF renderer is pinned to WeasyPrint 62 because 63 broke page breaks.", "WeasyPrint"),
+    ("From now on, name feature branches lg/<ticket>-<slug> in ledger-api.", "lg/<ticket>"),
+    ("Keep in mind that the tenants table is partitioned by region since the March migration.", "partitioned by region"),
+    ("Remember that credit notes are numbered CN-<year>-<seq> and the sequence resets every January.", "CN-<year>"),
+    ("Note that the ledger-api staging environment uses the EU Stripe sandbox account.", "EU Stripe sandbox"),
+];
+
+const E5_CORRECTIONS: &[&str] = &["No, don't use pip for this, use uv add instead.", "That's wrong: amounts are stored in cents, not Decimal.", "不对，部署要用 ops/deploy.sh，不要直接 kubectl apply。"];
+
+enum Step {
+    Prompt(String),
+    /// a task: prompt with a chain of tool outputs (each may be an error with a gold note)
+    Task(String, Vec<(String, String, Option<&'static str>)>),
+}
+
+/// The 120-request script (requests are counted, not steps). Deterministic.
+fn e5_script(queries: &[String]) -> Vec<Step> {
+    let mut v = vec![];
+    let mut err_i = 0usize;
+    let mut q = 0usize;
+    for t in 0..80 {
+        // every 3rd step a task with 2-3 tool calls; errors on every other task
+        if t % 6 == 2 && t / 6 < E5_PLANTED.len() {
+            v.push(Step::Prompt(E5_PLANTED[t / 6].0.to_string()));
+        } else if t % 3 == 1 {
+            let mut chain = vec![];
+            let len = 2 + (t / 3) % 2;
+            for k in 0..len {
+                let err = (t / 3) % 2 == 0 && k == 1;
+                if err {
+                    let (gold, cmd, out) = E5_ERRORS[err_i % E5_ERRORS.len()];
+                    err_i += 1;
+                    chain.push((cmd.to_string(), format!("{}\n{out}", log_output(t * 10 + k, 2_000)), Some(gold)));
+                } else {
+                    chain.push((format!("uv run pytest tests/unit -k part{t}_{k}"), log_output(t * 10 + k, 24_000), None));
+                }
+            }
+            let first = format!("Work item {t}: run the checks for this change and fix what fails. [[run:{}]]", chain[0].0);
+            v.push(Step::Task(first, chain));
+        } else if t % 16 == 5 {
+            v.push(Step::Prompt(E5_CORRECTIONS[(t / 16) % E5_CORRECTIONS.len()].to_string()));
+        } else if t % 12 == 9 {
+            v.push(Step::Prompt(format!("[[recall]] Before you continue, check what memory says about our test and migration conventions (step {t}).")));
+        } else {
+            v.push(Step::Prompt(queries[q % queries.len()].clone()));
+            q += 1;
+        }
+    }
+    v
+}
+
+struct E5Cfg {
+    name: &'static str,
+    budgets: bool,
+    dedup: bool,
+    flush: bool,
+    /// add 40 long ledger-api notes (≈2 kchar content + ≈1 kchar why each): the review's "realistic heavy" regime
+    heavy: bool,
+}
+
+/// Long, relevant notes for the heavy variant.
+fn heavy_notes() -> Vec<(String, String)> {
+    let topics = ["tests", "deploys", "migrations", "webhooks", "the invoice batch", "rate limits", "money columns", "SQLAlchemy", "Postgres", "reviews"];
+    (0..40)
+        .map(|i| {
+            let t = topics[i % topics.len()];
+            let body = format!("ledger-api runbook {i} on {t}: ") + &format!("when working on {t} in ledger-api check the {t} checklist item {i}, run the {t} verification step, compare against the {t} baseline and record the outcome in the {t} log; ").repeat(9);
+            let why = format!("learned the hard way during incident {i} on {t}: ") + &"the previous approach silently produced wrong results under load and took a day to diagnose; ".repeat(10);
+            (body, why)
+        })
+        .collect()
+}
+
+async fn e5_run(root: &Path, vc: &E5Cfg) -> Result<Value> {
+    let mut cfg = bench_config()?;
+    cfg.inject.budgets = vc.budgets;
+    cfg.inject.dedup = vc.dedup;
+    if !vc.flush {
+        cfg.inject.flush_at = 0.0;
+    }
+    cfg.distill.enabled = true; // heuristic distiller: only the flush / session-end triggers run it here
+    let ds = load_ds(&root.join("bench/data/devmem.json"))?;
+    let tmp = TempDir::new("e5")?;
+    let corpus = Corpus::build(&tmp.0.join("ws"), &ds)?;
+    let cwd = corpus.cwd("ledger-api");
+    let mock = Arc::new(Mock5::default());
+    let mock_url = serve_nodelay(Router::new().route("/v1/messages", post(mock5_handler)).with_state(mock.clone())).await?;
+    let (gw, _nd, engine) = gateway_env(&cfg, &ds, &corpus, &tmp.0.join("e5.db"), &mock_url, true).await?;
+    if vc.heavy {
+        let ctx = engine.ctx_for("claude-code", "seed", Some(&cwd));
+        for (c, w) in heavy_notes() {
+            engine.write(&ctx, WriteReq { content: c, why: Some(w), kind: Some("procedure".into()), scope: Some("project".into()), ..Default::default() }).await?;
+        }
+    }
+    let m2n: HashMap<String, String> = {
+        // map store ids back to dataset ids by content
+        let mut m = HashMap::new();
+        for mem in engine.store.list_memories(None, true, 100_000) {
+            if let Some(n) = ds.notes.iter().find(|n| n.content.trim() == mem.content) {
+                m.insert(mem.id.clone(), n.id.clone());
+            }
+        }
+        m
+    };
+    let queries: Vec<String> = ds.queries.iter().filter(|q| q.at == "ledger-api" && !q.gold.is_empty()).map(|q| q.q.clone()).collect();
+    let script = e5_script(&queries);
+    let client = http_client();
+    let system = cc_system(&cwd);
+    let tools = cc_tools();
+    let session = session_uuid(0xE5000000, hash_hex(&[vc.name]).len() as u64);
+    let window = 200_000f64;
+    let id_re = regex::Regex::new(r"m_[0-9a-z]{26}").unwrap();
+    let est = |v: &Value| unimem::budget::estimate_tokens(&v.to_string());
+
+    let mut msgs: Vec<Value> = vec![];
+    let mut rows: Vec<Value> = vec![];
+    let mut req = 0usize;
+    let (mut dup_new, mut new_total, mut cum_new) = (0usize, 0usize, 0usize);
+    let (mut err_turns, mut err_hits, mut err_avail, mut benign_tool_turns, mut benign_injections) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut err_detail = vec![];
+    let mut compaction: Value = Value::Null;
+    let (mut max_live_share, mut max_ctx_share) = (0f64, 0f64);
+    let mut planted_at_compaction = 0usize;
+    let mut planted_before = 0usize;
+    let mut compacted = false;
+    let mut post_compaction_preamble: Option<bool> = None;
+    let mut corrections_hinted = 0usize;
+    let mut flush_turn: Option<usize> = None;
+
+    let post = |client: &reqwest::Client, body: Value| {
+        let gw = gw.clone();
+        let session = session.clone();
+        let client = client.clone();
+        async move {
+            let r = client
+                .post(format!("{gw}/v1/messages"))
+                .header("x-api-key", "sk-bench")
+                .header("anthropic-version", "2023-06-01")
+                .header("user-agent", "claude-cli/2.0.0 (external, cli)")
+                .header("x-claude-code-session-id", &session)
+                .json(&body)
+                .send()
+                .await?;
+            anyhow::ensure!(r.status().is_success(), "status {}", r.status());
+            Ok::<Value, anyhow::Error>(r.json().await?)
+        }
+    };
+    let planted_count = |e: &Engine| -> usize {
+        let all = e.store.list_memories(None, false, 100_000);
+        E5_PLANTED.iter().filter(|(_, key)| all.iter().any(|m| m.content.contains(key))).count()
+    };
+
+    let mut steps = script.into_iter();
+    'outer: while req < 120 {
+        // forced compaction at request 60: the harness asks for a summary, then replaces the history with it
+        if req >= 60 && !compacted {
+            compacted = true;
+            let mut cm = msgs.clone();
+            cm.push(json!({"role":"user","content":[{"type":"text","text":"Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions."}]}));
+            let body = agent_body(&system, &tools, &cm, false);
+            let before = mock.seen.lock().len();
+            post(&client, body.clone()).await?;
+            let up = mock.seen.lock().get(before).cloned().unwrap_or(Value::Null);
+            // let a background distillation (pre-compaction flush) finish
+            for _ in 0..100 {
+                if engine.store.undistilled_episodes(&session).iter().all(|e| e.role != "user") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            planted_at_compaction = planted_count(&engine);
+            compaction = json!({"at_request": req, "request_passed_through_untouched": up == body, "messages_before": msgs.len()});
+            msgs = vec![
+                json!({"role":"user","content":[{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. The conversation is summarized below:\nThe user is working on ledger-api billing: tests, webhooks, the invoice batch and migrations."}]}),
+                json!({"role":"assistant","content":[{"type":"text","text":"Understood. Continuing from the summary."}]}),
+            ];
+        }
+        let Some(step) = steps.next() else { break };
+        let (prompt, chain) = match step {
+            Step::Prompt(p) => (p, vec![]),
+            Step::Task(p, c) => (p, c),
+        };
+        if !compacted && E5_PLANTED.iter().any(|x| x.0 == prompt) {
+            planted_before += 1;
+        }
+        msgs.push(json!({"role":"user","content":[{"type":"text","text": prompt}]}));
+        let mut tool_i = 0usize;
+        let mut expect: Option<&'static str> = None;
+        loop {
+            if req >= 120 {
+                break 'outer;
+            }
+            let body = agent_body(&system, &tools, &msgs, false);
+            let before = mock.seen.lock().len();
+            let vis = post(&client, body.clone()).await?;
+            req += 1;
+            let ups: Vec<Value> = mock.seen.lock()[before..].to_vec();
+            let up = ups.first().cloned().unwrap_or(Value::Null);
+            // what unimem added to the live context = upstream messages − harness messages (incl. replayed hidden rounds)
+            let live = est(&up["messages"]).saturating_sub(est(&body["messages"]));
+            let ctx_tokens = est(&up);
+            let last_up = up["messages"].as_array().and_then(|a| a.last()).cloned().unwrap_or(Value::Null);
+            let new_blocks: Vec<String> = blocks_of(&last_up["content"]).iter().filter_map(|b| b["text"].as_str()).filter(|t| t.contains("<unimem")).map(String::from).collect();
+            let new_text = new_blocks.join("\n");
+            let new_tokens = unimem::budget::estimate_tokens(&new_text);
+            let earlier = {
+                let mut m = up["messages"].as_array().cloned().unwrap_or_default();
+                m.pop();
+                Value::Array(m).to_string()
+            };
+            let new_ids: Vec<String> = id_re.find_iter(&new_text).map(|m| m.as_str().to_string()).collect();
+            let dups = new_ids.iter().filter(|id| earlier.contains(id.as_str())).count();
+            dup_new += dups;
+            new_total += new_ids.len();
+            cum_new += new_tokens;
+            max_live_share = max_live_share.max(live as f64 / window);
+            max_ctx_share = max_ctx_share.max(ctx_tokens as f64 / window);
+            if new_text.contains("Context is nearly full") && flush_turn.is_none() {
+                flush_turn = Some(req);
+            }
+            if new_text.contains("The user just corrected you") {
+                corrections_hinted += 1;
+            }
+            let kind = if tool_i == 0 { "prompt" } else { "tool" };
+            if compacted && post_compaction_preamble.is_none() {
+                post_compaction_preamble = Some(new_text.contains("<unimem-context>"));
+            }
+            if kind == "tool" {
+                let tool_recall_ids: Vec<String> = new_blocks.iter().filter(|b| b.contains("tool-error")).flat_map(|b| id_re.find_iter(b).map(|m| m.as_str().to_string()).collect::<Vec<_>>()).collect();
+                match expect {
+                    Some(gold) => {
+                        err_turns += 1;
+                        let hit = tool_recall_ids.iter().any(|id| m2n.get(id).map(String::as_str) == Some(gold));
+                        // the gold note was already in the live context (preamble, earlier recall): no injection needed
+                        let live_already = id_re.find_iter(&earlier).any(|m| m2n.get(m.as_str()).map(String::as_str) == Some(gold));
+                        err_hits += hit as usize;
+                        err_avail += (hit || live_already) as usize;
+                        err_detail.push(json!({"request": req, "gold": gold, "hit": hit, "already_live": live_already, "injected": tool_recall_ids.iter().map(|i| m2n.get(i).cloned().unwrap_or(i.clone())).collect::<Vec<_>>()}));
+                    }
+                    None => {
+                        benign_tool_turns += 1;
+                        benign_injections += (!tool_recall_ids.is_empty()) as usize;
+                    }
+                }
+            }
+            rows.push(json!({"request": req, "kind": kind, "context_tokens": ctx_tokens, "unimem_live_tokens": live, "new_injected_tokens": new_tokens, "cumulative_new_tokens": cum_new, "new_note_ids": new_ids.len(), "duplicate_new_ids": dups, "upstream_rounds": ups.len()}));
+            let content = vis["content"].as_array().cloned().unwrap_or_default();
+            msgs.push(json!({"role":"assistant","content": content.clone()}));
+            let bash: Vec<String> = content.iter().filter(|b| b["type"] == "tool_use" && b["name"] == "Bash").filter_map(|b| b["id"].as_str().map(String::from)).collect();
+            if bash.is_empty() {
+                break;
+            }
+            // the harness runs the command: scripted output (+ the next command marker for chains)
+            let (_, out, gold) = chain.get(tool_i).cloned().unwrap_or_default();
+            tool_i += 1;
+            expect = gold;
+            let next = chain.get(tool_i).map(|c| format!("\n[[run:{}]]", c.0)).unwrap_or_default();
+            msgs.push(json!({"role":"user","content": bash.iter().map(|id| json!({"type":"tool_result","tool_use_id": id, "content": format!("{out}{next}")})).collect::<Vec<_>>()}));
+        }
+    }
+    let planted_end = planted_count(&engine);
+    let st_rows: Vec<&Value> = rows.iter().collect();
+    let live_series: Vec<f64> = st_rows.iter().map(|r| r["unimem_live_tokens"].as_f64().unwrap_or(0.0)).collect();
+    Ok(json!({
+        "variant": vc.name, "budgets": vc.budgets, "dedup": vc.dedup, "flush": vc.flush,
+        "requests": req, "window": window,
+        "summary": {
+            "max_unimem_live_tokens": live_series.iter().cloned().fold(0.0, f64::max),
+            "max_unimem_context_share": r3(max_live_share),
+            "max_total_context_share": r3(max_ctx_share),
+            "cumulative_new_injected_tokens": cum_new,
+            "new_note_injections": new_total,
+            "duplicate_injections": dup_new,
+            "compaction": compaction,
+            "preamble_reinjected_after_compaction": post_compaction_preamble,
+            "tool_error_turns": err_turns, "tool_error_recall_hits": err_hits, "tool_error_gold_in_context": err_avail,
+            "benign_tool_turns": benign_tool_turns, "benign_tool_turn_injections": benign_injections,
+            "corrections_hinted": corrections_hinted,
+            "flush_nudge_at_request": flush_turn,
+            "planted_facts": E5_PLANTED.len(), "planted_before_compaction": planted_before, "planted_captured_by_compaction": planted_at_compaction, "planted_captured_by_end": planted_end,
+        },
+        "tool_error_detail": err_detail,
+        "per_request": rows,
+    }))
+}
+
+async fn e5(root: &Path) -> Result<Value> {
+    let variants = [
+        E5Cfg { name: "v0.4", budgets: true, dedup: true, flush: true, heavy: false },
+        E5Cfg { name: "no-flush", budgets: true, dedup: true, flush: false, heavy: false },
+        E5Cfg { name: "no-budget", budgets: false, dedup: true, flush: true, heavy: false },
+        E5Cfg { name: "no-budget-no-dedup", budgets: false, dedup: false, flush: true, heavy: false },
+        E5Cfg { name: "heavy/v0.4", budgets: true, dedup: true, flush: true, heavy: true },
+        E5Cfg { name: "heavy/no-budget", budgets: false, dedup: true, flush: true, heavy: true },
+        E5Cfg { name: "heavy/no-budget-no-dedup", budgets: false, dedup: false, flush: true, heavy: true },
+    ];
+    let mut out = serde_json::Map::new();
+    for v in &variants {
+        let r = e5_run(root, v).await?;
+        println!("[e5] {:20} {}", v.name, r["summary"]);
+        out.insert(v.name.to_string(), r);
+    }
+    Ok(json!({
+        "experiment": "E5 long session",
+        "config": config_info(&bench_config()?),
+        "setup": "120 client requests of a Claude-Code-like session on ledger-api (devmem corpus loaded; 200k window): prompts from the ledger-api queries, 6 planted user facts, 3 corrections, tasks with 2-3 Bash calls each (24k-char logs; every other task has one error whose root cause is a stored note), 4 prompts that make the model call unimem_recall (hidden rounds). At request 60 the harness sends its compaction request and replaces the history with a summary. 'heavy' variants add 40 long relevant notes (≈2 kchar + ≈1 kchar why). Token counts are the gateway's estimator (budget.rs). 'unimem_live_tokens' = upstream messages minus harness messages (replayed augmentations + hidden rounds).",
+        "variants": out,
+    }))
+}
+
 // ============================================================================ E3 project identification
 
 struct Case {
@@ -2023,6 +2404,22 @@ fn summary(out: &Path, data: &Path) -> Result<()> {
             ));
         }
     }
+    if let Some(e5) = load("e5_long_session.json") {
+        s.push_str(&format!("\n## E5 — long session (budgets, de-dup, compaction, tool-error recall, flush)\n\n{}\n\n", f(&e5["setup"])));
+        s.push_str("| variant | max unimem live tokens | max unimem share of window | max total context share | cumulative new injected tokens | note injections | duplicate injections | preamble after compaction | compaction request untouched | tool-error turns | recall hits | gold in context | benign tool turns w/ injection | corrections hinted | flush nudge at req | planted facts stored by the compaction (of those stated before it) |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+        if let Some(o) = e5["variants"].as_object() {
+            for (k, v) in o {
+                let x = &v["summary"];
+                s.push_str(&format!(
+                    "| {k} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}/{} | {} | {} | {}/{} |\n",
+                    f(&x["max_unimem_live_tokens"]), pctf(&x["max_unimem_context_share"]), pctf(&x["max_total_context_share"]), f(&x["cumulative_new_injected_tokens"]), f(&x["new_note_injections"]), f(&x["duplicate_injections"]),
+                    f(&x["preamble_reinjected_after_compaction"]), f(&x["compaction"]["request_passed_through_untouched"]), f(&x["tool_error_turns"]), f(&x["tool_error_recall_hits"]), f(&x["tool_error_gold_in_context"]),
+                    f(&x["benign_tool_turn_injections"]), f(&x["benign_tool_turns"]), f(&x["corrections_hinted"]), f(&x["flush_nudge_at_request"]), f(&x["planted_captured_by_compaction"]), f(&x["planted_before_compaction"])
+                ));
+            }
+        }
+        s.push_str("\nPer-request series (context tokens, unimem live tokens, new injected tokens, cumulative) are in `e5_long_session.json` → `variants.<name>.per_request`.\n");
+    }
     if let Ok(obs) = std::fs::read_to_string(out.join("OBSERVATIONS.md")) {
         s.push('\n');
         s.push_str(&obs);
@@ -2066,8 +2463,11 @@ async fn main() -> Result<()> {
     if run("e4") {
         save("e4_throughput.json", &e4(&root).await?)?;
     }
-    if !["all", "e1", "e2", "e3", "e4", "summary"].contains(&what.as_str()) {
-        bail!("usage: unimem-bench [all|e1|e2|e3|e4|summary] [--data <dataset.json>] [--out <dir>]");
+    if run("e5") {
+        save("e5_long_session.json", &e5(&root).await?)?;
+    }
+    if !["all", "e1", "e2", "e3", "e4", "e5", "summary"].contains(&what.as_str()) {
+        bail!("usage: unimem-bench [all|e1|e2|e3|e4|e5|summary] [--data <dataset.json>] [--out <dir>]");
     }
     summary(&out, &data)?;
     println!("wrote {}", out.join("SUMMARY.md").display());

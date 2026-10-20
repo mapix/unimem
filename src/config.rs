@@ -47,6 +47,30 @@ pub struct Inject {
     pub max_continuations: usize,
     /// Record every prompt turn into the episode log.
     pub record_episodes: bool,
+    /// Token budgets (see `budget.rs`). `false` disables every cap below (for comparisons only).
+    pub budgets: bool,
+    /// Skip notes whose id is still visible in the live request (cross-turn de-dup).
+    pub dedup: bool,
+    /// Per-message cap for passive recall + hints: min(this, 0.6% of the context window).
+    pub max_inject_tokens: usize,
+    /// Preamble cap: min(this, 1% of the context window).
+    pub max_preamble_tokens: usize,
+    /// Cap on one unimem tool result.
+    pub max_tool_tokens: usize,
+    /// Everything unimem keeps in one live context: at most this share of the window (passive recall stops beyond).
+    pub max_session_share: f64,
+    /// Model id prefix → context window (tokens); `"*"` sets the fallback for unknown models.
+    pub context_windows: std::collections::BTreeMap<String, u64>,
+    /// Recall on tool-result turns that show an error (≤2 notes, `tool_recall_max_tokens`).
+    pub tool_recall: bool,
+    /// At most one tool-triggered recall per this many tool turns of a conversation.
+    pub tool_recall_every: u64,
+    pub tool_recall_max_tokens: usize,
+    /// Pre-compaction flush: when the estimated context exceeds this share of the window, distill the session in
+    /// the background and nudge the agent once to save durable facts.
+    pub flush_at: f64,
+    /// Append a short "save it with unimem_remember" hint when the user corrects the agent.
+    pub correction_hints: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +113,10 @@ pub struct EmbedderCfg {
     pub api_key: Option<String>,
     pub model: String,
     pub dim: usize,
+    /// Near-duplicate cosine for this embedder (default per embedder: hash 0.97, e5 0.95).
+    pub near_dup_cos: Option<f32>,
+    /// Typical cosine of unrelated texts, subtracted before the code-side priors (default: hash 0, e5 0.75).
+    pub cos_baseline: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +129,13 @@ pub struct DistillCfg {
     pub model: String,
     /// A session is distilled after being idle this long.
     pub idle_secs: u64,
+    /// Episodes older than this are deleted (distilled or not).
+    pub episode_ttl_days: u64,
+    /// Skip background distillation when the last upstream response showed less than this share of the rate limit
+    /// remaining (`anthropic-ratelimit-*-remaining` / `x-ratelimit-remaining-*`).
+    pub min_rate_limit_remaining: f64,
+    /// Characters of transcript per distillation call (sessions are processed in chunks of this size).
+    pub chunk_chars: usize,
 }
 
 impl Default for Config {
@@ -138,6 +173,18 @@ impl Default for Inject {
             preamble_max_notes: 8,
             max_continuations: 6,
             record_episodes: true,
+            budgets: true,
+            dedup: true,
+            max_inject_tokens: 1200,
+            max_preamble_tokens: 1500,
+            max_tool_tokens: 3000,
+            max_session_share: 0.05,
+            context_windows: Default::default(),
+            tool_recall: true,
+            tool_recall_every: 5,
+            tool_recall_max_tokens: 400,
+            flush_at: 0.7,
+            correction_hints: true,
         }
     }
 }
@@ -177,6 +224,8 @@ impl Default for EmbedderCfg {
             api_key: None,
             model: String::new(),
             dim: 512,
+            near_dup_cos: None,
+            cos_baseline: None,
         }
     }
 }
@@ -189,6 +238,9 @@ impl Default for DistillCfg {
             api_key: None,
             model: String::new(),
             idle_secs: 600,
+            episode_ttl_days: 30,
+            min_rate_limit_remaining: 0.1,
+            chunk_chars: 24_000,
         }
     }
 }

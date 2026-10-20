@@ -191,6 +191,7 @@ fn agent_req(input: Value, stream: bool) -> Value {
 
 struct Stream {
     events: Vec<(String, Value)>,
+    raw: String,
 }
 
 impl Stream {
@@ -199,7 +200,7 @@ impl Stream {
         let bytes = r.bytes().await.unwrap();
         let mut p = sse::Parser::default();
         let events = p.push(&bytes).into_iter().map(|e| (e.event.clone().unwrap_or_default(), e.json().unwrap())).collect();
-        Self { events }
+        Self { events, raw: String::from_utf8_lossy(&bytes).into_owned() }
     }
     fn of(&self, ty: &str) -> Vec<&Value> {
         self.events.iter().filter(|e| e.0 == ty).map(|e| &e.1).collect()
@@ -263,10 +264,14 @@ async fn stream_intercepts_merges_and_expands_next_request() {
     let done = s.completed();
     assert_eq!(done["id"], "resp_1", "merged response keeps the first id");
     assert_eq!(done["output"].as_array().unwrap(), &items);
-    assert_eq!(done["usage"]["input_tokens"], 240);
+    // honest usage: last round's input side, summed output; true totals in `x_unimem_usage`
+    assert_eq!(done["usage"]["input_tokens"], 140);
     assert_eq!(done["usage"]["output_tokens"], 37);
-    assert_eq!(done["usage"]["input_tokens_details"]["cached_tokens"], 120);
-    assert_eq!(done["usage"]["total_tokens"], 277);
+    assert_eq!(done["usage"]["input_tokens_details"]["cached_tokens"], 70);
+    assert_eq!(done["usage"]["output_tokens_details"]["reasoning_tokens"], 2);
+    assert_eq!(done["usage"]["total_tokens"], 177);
+    assert!(s.raw.contains(": x-unimem-usage {"), "true totals as an SSE comment");
+    assert!(s.raw.contains("\"input_tokens\":240"));
     // text deltas of round 2 carry the renumbered index
     let deltas: Vec<u64> = s.of("response.output_text.delta").iter().map(|v| v["output_index"].as_u64().unwrap()).collect();
     assert_eq!(deltas, vec![1, 1, 2, 2]);
@@ -340,7 +345,7 @@ async fn non_stream_merges_rounds_and_sums_usage() {
     assert_eq!(out[0]["content"][0]["text"], "Checking memory.");
     assert_eq!(out[1]["content"][0]["text"], "Nothing recorded.");
     assert_eq!(v["id"], "resp_a");
-    assert_eq!(v["usage"]["input_tokens"], 220);
+    assert_eq!(v["usage"]["input_tokens"], 120);
     assert_eq!(v["usage"]["output_tokens"], 17);
     assert!(!v.to_string().contains("unimem_"));
 

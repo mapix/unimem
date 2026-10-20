@@ -237,9 +237,9 @@ async fn stream_intercepts_merges_and_expands_next_request() {
     assert!(s.chunks.iter().all(|c| c["id"] == "c1"), "one completion id");
     let u = s.usage();
     assert_eq!(u.len(), 1);
-    assert_eq!(u[0]["prompt_tokens"], 240);
+    assert_eq!(u[0]["prompt_tokens"], 140, "last round's prompt = the real context");
     assert_eq!(u[0]["completion_tokens"], 37);
-    assert_eq!(s.chunks.last().unwrap()["usage"]["total_tokens"], 277);
+    assert_eq!(s.chunks.last().unwrap()["usage"]["total_tokens"], 177);
 
     let seen = e.seen();
     assert_eq!(seen.len(), 2);
@@ -298,9 +298,9 @@ async fn non_stream_merges_rounds_and_sums_usage() {
     assert_eq!(m["content"], "Checking memory.\n\nNothing recorded.");
     assert!(m.get("tool_calls").is_none());
     assert_eq!(v["choices"][0]["finish_reason"], "stop");
-    assert_eq!(v["usage"]["prompt_tokens"], 220);
+    assert_eq!(v["usage"]["prompt_tokens"], 120);
     assert_eq!(v["usage"]["completion_tokens"], 17);
-    assert_eq!(v["usage"]["prompt_tokens_details"]["cached_tokens"], 110);
+    assert_eq!(v["usage"]["prompt_tokens_details"]["cached_tokens"], 60);
 
     let b2 = e.seen()[1].body();
     assert_eq!(b2["messages"][2]["tool_call_id"], "call_r1");

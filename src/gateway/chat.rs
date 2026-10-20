@@ -36,10 +36,11 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::responses::{add_usage, raw_passthrough};
+use super::responses::raw_passthrough;
+use super::turn::{self, Live, Turn as MemTurn};
 use super::{
-    aug_anchor, build_augmentation, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, record_turn, relay,
-    response_headers, send_json, sse, sse_response, upstream_error, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
+    response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -160,9 +161,18 @@ fn req_info(headers: &HeaderMap, body: &Value, msgs: &[Value]) -> ReqInfo {
 
 // ================================================================ overlay replay
 
-fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Vec<Value> {
+/// A user message carrying text unimem added after `role: tool` results (tool-error recall, flush nudge).
+fn aug_message(text: &str) -> Value {
+    json!({"role": "user", "content": text})
+}
+
+/// Replayed messages, matched augment anchors, hidden messages put back.
+fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> (Vec<Value>, Vec<String>, Vec<Value>) {
     let keys: Vec<String> = orig.iter().map(msg_key).collect();
     let mut out = Vec::with_capacity(orig.len() + 4);
+    let mut anchors = vec![];
+    let mut hidden = vec![];
+    let n = orig.len();
     for (i, m) in orig.into_iter().enumerate() {
         let prev = if i == 0 { "" } else { keys[i - 1].as_str() };
         match role(&m) {
@@ -170,23 +180,64 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Vec<Value> {
                 let vis = visible_key(&m);
                 let ov = if vis.is_empty() { None } else { st.engine.store.get_overlay(&expand_anchor(session, prev, &vis), session) };
                 match ov {
-                    Some((k, p)) if k == K_EXPAND && p["messages"].as_array().is_some_and(|a| !a.is_empty()) => out.extend(p["messages"].as_array().cloned().unwrap_or_default()),
+                    Some((k, p)) if k == K_EXPAND && p["messages"].as_array().is_some_and(|a| !a.is_empty()) => {
+                        let msgs = p["messages"].as_array().cloned().unwrap_or_default();
+                        hidden.extend(msgs.iter().take(msgs.len().saturating_sub(1)).cloned());
+                        out.extend(msgs);
+                    }
                     _ => out.push(m),
                 }
             }
             "user" => {
                 let mut m = m;
-                if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i]), session) {
+                let anchor = aug_anchor(session, prev, &keys[i]);
+                if let Some((k, p)) = st.engine.store.get_overlay(&anchor, session) {
                     if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
                         append_text(&mut m, t);
+                        anchors.push(anchor);
                     }
                 }
                 out.push(m);
             }
+            "tool" => {
+                // the last tool message of a run may carry a tool-error augmentation (a user message after it)
+                let anchor = aug_anchor(session, prev, &keys[i]);
+                out.push(m);
+                if i + 1 == n || keys.get(i + 1).is_some_and(|k| !k.starts_with("t:")) {
+                    if let Some((k, p)) = st.engine.store.get_overlay(&anchor, session) {
+                        if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
+                            out.push(aug_message(t));
+                            anchors.push(anchor);
+                        }
+                    }
+                }
+            }
             _ => out.push(m),
         }
     }
-    out
+    (out, anchors, hidden)
+}
+
+/// Text of the trailing `role: tool` messages and the arguments of the calls they answer.
+fn trailing_tool_results(msgs: &[Value]) -> (String, String) {
+    let n = msgs.iter().rev().take_while(|m| role(m) == "tool").count();
+    if n == 0 {
+        return (String::new(), String::new());
+    }
+    let outs = &msgs[msgs.len() - n..];
+    let ids: Vec<&str> = outs.iter().filter_map(|m| m["tool_call_id"].as_str()).collect();
+    let text = outs.iter().map(|m| texts(&m["content"]).join("\n")).collect::<Vec<_>>().join("\n");
+    let cmds = msgs
+        .iter()
+        .flat_map(calls)
+        .filter(|c| c["id"].as_str().is_some_and(|i| ids.contains(&i)))
+        .map(|c| {
+            let a = c["function"]["arguments"].as_str().unwrap_or("").to_string();
+            serde_json::from_str::<Value>(&a).ok().and_then(|v| v["command"].as_str().map(String::from)).unwrap_or(a)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (text, cmds)
 }
 
 // ================================================================ rounds & finalization
@@ -348,25 +399,49 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     let keys: Vec<String> = orig.iter().map(msg_key).collect();
     let last_role = orig.last().map(|m| role(m).to_string()).unwrap_or_default();
     let prompt = orig.last().and_then(prompt_text);
-    let mut messages = replay(&st, &info.session, orig);
+    if prompt.as_deref().is_some_and(turn::is_compaction_request) {
+        st.engine.store.trace("compaction_request", &json!({"dialect": "chat", "msgs": orig.len()}));
+        return raw_passthrough(&st, &url, &parts.headers, bytes).await;
+    }
+    let (results, commands) = trailing_tool_results(&orig);
+    let first_user = orig.iter().find(|m| role(m) == "user");
+    let first_hash = first_user.map(msg_key).unwrap_or_default();
+    let summary_key = first_user.filter(|m| texts(&m["content"]).iter().any(|t| turn::has_summary_marker(t))).map(msg_key);
+    let n_orig = orig.len();
+    let (mut messages, anchors, hidden) = replay(&st, &info.session, orig);
 
     if st.engine.cfg.inject.tools {
         inject_tools(&mut body);
     }
-    if let (Some(text), Some(last_key)) = (prompt.as_deref(), keys.last()) {
+    let model = body["model"].as_str().unwrap_or("").to_string();
+    let live = Live::scan(&json!({"tools": body["tools"], "messages": messages}), anchors, n_orig, first_hash, summary_key).with_hidden(&hidden);
+    let mut tn = MemTurn::begin(&st, &ctx, live, &model, "");
+    if let Some(last_key) = keys.last() {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };
         let anchor = aug_anchor(&info.session, prev, last_key);
-        if st.engine.store.get_overlay(&anchor, &info.session).is_none() {
-            record_turn(&st, &ctx, "user", text);
-            let aug = build_augmentation(&st, &ctx, text).await;
-            if let (Some(a), Some(m)) = (aug.as_deref(), messages.last_mut()) {
-                append_text(m, a);
+        if (prompt.is_some() || !results.is_empty()) && st.engine.store.get_overlay(&anchor, &info.session).is_none() {
+            let aug = match prompt.as_deref() {
+                Some(text) => {
+                    record_turn(&st, &ctx, "user", text);
+                    tn.prompt_augmentation(&st, &ctx, text, &anchor).await
+                }
+                None => tn.tool_augmentation(&st, &ctx, &results, &commands, &anchor).await,
+            };
+            if let Some(a) = aug.as_deref() {
+                if prompt.is_some() {
+                    if let Some(m) = messages.last_mut() {
+                        append_text(m, a);
+                    }
+                } else {
+                    messages.push(aug_message(a));
+                }
             }
             if let Err(e) = st.engine.store.put_overlay(&anchor, &info.session, K_AUG, &json!({"text": aug.unwrap_or_default()})) {
                 tracing::warn!("storing augment overlay failed: {e}");
             }
         }
     }
+    tn.finish(&st);
     body["messages"] = Value::Array(messages);
 
     let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
@@ -415,12 +490,13 @@ async fn non_stream(st: &AppState, mut t: Turn, first: reqwest::Response) -> Res
         return raw_response(bytes);
     }
     let mut merged = cur.clone();
-    let mut usage = Value::Null;
+    let (mut usage, mut totals) = (Value::Null, Value::Null);
     let mut rounds: Vec<RoundRec> = vec![];
     let mut finish: Value;
     let mut conts = 0;
     loop {
-        add_usage(&mut usage, &cur["usage"]);
+        merge_usage(&mut usage, &mut totals, &cur["usage"]);
+        turn::note_usage(st, &t.ctx.session, &cur["usage"]);
         let msg = cur["choices"][0]["message"].clone();
         finish = cur["choices"][0]["finish_reason"].clone();
         let (results, cont) = after_round(st, &t.ctx, &msg, finish.as_str().unwrap_or(""), conts).await;
@@ -448,13 +524,18 @@ async fn non_stream(st: &AppState, mut t: Turn, first: reqwest::Response) -> Res
         }
     }
     let fin = visible_finish(&rounds, finish);
+    let n_rounds = rounds.len();
     merged["choices"][0]["message"] = finalize(st, &t, rounds);
     merged["choices"][0]["finish_reason"] = fin;
     if !usage.is_null() {
         merged["usage"] = usage;
     }
+    trace_usage(st, &t.ctx, &totals, &merged["usage"], n_rounds);
     let mut r = raw_response(Bytes::from(serde_json::to_vec(&merged).unwrap_or_default()));
     r.headers_mut().insert("content-type", HeaderValue::from_static("application/json"));
+    if let Some(h) = usage_header(&totals, n_rounds) {
+        r.headers_mut().insert("x-unimem-usage", h);
+    }
     r
 }
 
@@ -671,7 +752,7 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
     let mut p = Pump { tx, head: None, first_round: true, next_out: 0, text_sent: false };
     let mut resp = first;
     let mut rounds: Vec<RoundRec> = vec![];
-    let mut usage = Value::Null;
+    let (mut usage, mut totals) = (Value::Null, Value::Null);
     let mut finish: Value;
     let mut conts = 0;
     loop {
@@ -681,7 +762,8 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
         if end == RoundEnd::ClientGone {
             return;
         }
-        add_usage(&mut usage, &r.usage);
+        merge_usage(&mut usage, &mut totals, &r.usage);
+        turn::note_usage(&st, &t.ctx.session, &r.usage);
         finish = if r.finish.is_null() { json!("stop") } else { r.finish.clone() };
         let f = if end == RoundEnd::Done { finish.as_str().unwrap_or("").to_string() } else { String::new() };
         let msg = r.message();
@@ -706,6 +788,7 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
         }
     }
     let fin = visible_finish(&rounds, finish);
+    trace_usage(&st, &t.ctx, &totals, &usage, rounds.len());
     finalize(&st, &t, rounds);
     let Some(head) = p.head.clone() else { return };
     let mut last = head.clone();

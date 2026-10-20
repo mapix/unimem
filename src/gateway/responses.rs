@@ -55,9 +55,10 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+use super::turn::{self, Live, Turn as MemTurn};
 use super::{
-    aug_anchor, build_augmentation, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, record_turn, relay,
-    response_headers, send_json, sse, sse_response, upstream_error, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
+    response_headers, send_json, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -204,6 +205,8 @@ fn text_of_items(items: &[Value]) -> String {
 }
 
 /// Sum token counters recursively (`input_tokens_details.cached_tokens` …); non-numbers take the latest value.
+/// (v0.3 reporting; merged responses now use [`super::merge_usage`].)
+#[cfg(test)]
 pub(super) fn add_usage(acc: &mut Value, u: &Value) {
     let Some(u) = u.as_object() else { return };
     if !acc.is_object() {
@@ -246,33 +249,91 @@ fn load_items(st: &AppState, anchor: &str, session: &str) -> Option<Vec<Value>> 
     }
 }
 
-fn replay(st: &AppState, session: &str, orig: Vec<Value>, expand: bool) -> Vec<Value> {
+/// Replayed input, the augment anchors that matched, and the hidden items put back.
+struct Replayed {
+    input: Vec<Value>,
+    anchors: Vec<String>,
+    hidden: Vec<Value>,
+}
+
+/// A user message carrying text unimem added after a tool-output item (tool-error recall, flush nudge).
+fn aug_message(text: &str) -> Value {
+    json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]})
+}
+
+fn is_output(it: &Value) -> bool {
+    ty(it).ends_with("_output")
+}
+
+fn replay(st: &AppState, session: &str, orig: Vec<Value>, expand: bool) -> Replayed {
     let keys: Vec<String> = orig.iter().map(item_key).collect();
     let mut out = Vec::with_capacity(orig.len() + 4);
+    let mut anchors = vec![];
+    let mut hidden = vec![];
     for (i, it) in orig.into_iter().enumerate() {
         let prev = if i == 0 { "" } else { keys[i - 1].as_str() };
         let model = expand && is_model_item(&it);
         if model {
             if let Some(items) = load_items(st, &before_anchor(session, prev, &keys[i]), session) {
+                hidden.extend(items.iter().cloned());
                 out.extend(items);
             }
         }
         let mut it = it;
-        if is_message(&it) && st_of(&it, "role") == "user" {
-            if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i]), session) {
+        let mut after: Option<Value> = None;
+        let user = is_message(&it) && st_of(&it, "role") == "user";
+        if user || is_output(&it) {
+            let anchor = aug_anchor(session, prev, &keys[i]);
+            if let Some((k, p)) = st.engine.store.get_overlay(&anchor, session) {
                 if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
-                    append_part(&mut it, t);
+                    if user {
+                        append_part(&mut it, t);
+                    } else {
+                        after = Some(aug_message(t));
+                    }
+                    anchors.push(anchor);
                 }
             }
         }
         out.push(it);
+        out.extend(after);
         if model {
             if let Some(items) = load_items(st, &after_anchor(session, prev, &keys[i]), session) {
+                hidden.extend(items.iter().cloned());
                 out.extend(items);
             }
         }
     }
-    out
+    Replayed { input: out, anchors, hidden }
+}
+
+/// Output text of the trailing run of `*_output` items (the tool results this request answers) and the arguments of
+/// the calls that produced them.
+fn trailing_outputs(input: &[Value]) -> (String, String) {
+    let n = input.iter().rev().take_while(|i| is_output(i)).count();
+    if n == 0 {
+        return (String::new(), String::new());
+    }
+    let outs = &input[input.len() - n..];
+    let ids: Vec<&str> = outs.iter().map(|o| st_of(o, "call_id")).collect();
+    let text = outs
+        .iter()
+        .map(|o| match &o["output"] {
+            Value::String(s) => s.clone(),
+            v => content_texts(v).join("\n"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let cmds = input
+        .iter()
+        .filter(|i| !is_output(i) && ids.contains(&st_of(i, "call_id")))
+        .map(|i| {
+            let a = i.get("arguments").and_then(Value::as_str).unwrap_or("");
+            serde_json::from_str::<Value>(a).ok().and_then(|v| v.get("command").map(|c| match c { Value::Array(x) => x.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "), c => c.as_str().unwrap_or("").to_string() })).unwrap_or_else(|| a.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (text, cmds)
 }
 
 // ================================================================ rounds & finalization
@@ -429,6 +490,11 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
         _ => return raw_passthrough(&st, &url, &parts.headers, bytes).await,
     };
 
+    // Codex's compaction request (summarize the conversation for a handoff): pass through untouched.
+    if orig.last().and_then(prompt_text).is_some_and(|t| turn::is_compaction_request(&t)) {
+        st.engine.store.trace("compaction_request", &json!({"dialect": "responses", "items": orig.len()}));
+        return raw_passthrough(&st, &url, &parts.headers, bytes).await;
+    }
     let info = req_info(&parts.headers, &body, &orig);
     let ctx = make_ctx(&st, &info);
     let keep_ids = body.get("store").and_then(Value::as_bool) == Some(true);
@@ -437,26 +503,51 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     // 1. overlay replay
     let keys: Vec<String> = orig.iter().map(item_key).collect();
     let prompt = orig.last().and_then(prompt_text);
-    let mut input = replay(&st, &info.session, orig, !chained);
+    let (outputs, commands) = trailing_outputs(&orig);
+    let first_user = orig.iter().find(|i| prompt_text(i).is_some());
+    let first_hash = first_user.map(item_key).unwrap_or_default();
+    let summary_key = orig
+        .iter()
+        .find(|i| turn::SUMMARY_ITEM_TYPES.contains(&ty(i)) || is_message(i) && content_texts(&i["content"]).iter().any(|t| turn::has_summary_marker(t)))
+        .map(item_key);
+    let n_orig = orig.len();
+    let rp = replay(&st, &info.session, orig, !chained);
+    let mut input = rp.input;
 
     // 2. injection
     if st.engine.cfg.inject.tools {
         inject_tools(&mut body);
     }
-    if let (Some(text), Some(last_key)) = (prompt.as_deref(), keys.last()) {
+    let model = body["model"].as_str().unwrap_or("").to_string();
+    let live = Live::scan(&json!({"instructions": body["instructions"], "tools": body["tools"], "input": input}), rp.anchors.clone(), n_orig, first_hash, summary_key).with_hidden(&rp.hidden);
+    let mut tn = MemTurn::begin(&st, &ctx, live, &model, "");
+    if let Some(last_key) = keys.last() {
         let prev = if keys.len() >= 2 { keys[keys.len() - 2].as_str() } else { "" };
         let anchor = aug_anchor(&info.session, prev, last_key);
-        if st.engine.store.get_overlay(&anchor, &info.session).is_none() {
-            record_turn(&st, &ctx, "user", text);
-            let aug = build_augmentation(&st, &ctx, text).await;
-            if let (Some(a), Some(m)) = (aug.as_deref(), input.last_mut()) {
-                append_part(m, a);
+        if (prompt.is_some() || !outputs.is_empty()) && st.engine.store.get_overlay(&anchor, &info.session).is_none() {
+            let aug = match prompt.as_deref() {
+                Some(text) => {
+                    record_turn(&st, &ctx, "user", text);
+                    tn.prompt_augmentation(&st, &ctx, text, &anchor).await
+                }
+                None => tn.tool_augmentation(&st, &ctx, &outputs, &commands, &anchor).await,
+            };
+            if let Some(a) = aug.as_deref() {
+                if prompt.is_some() {
+                    if let Some(m) = input.last_mut() {
+                        append_part(m, a);
+                    }
+                } else {
+                    // after the function_call_output items: an extra user input_text message
+                    input.push(aug_message(a));
+                }
             }
             if let Err(e) = st.engine.store.put_overlay(&anchor, &info.session, K_AUG, &json!({"text": aug.unwrap_or_default()})) {
                 tracing::warn!("storing augment overlay failed: {e}");
             }
         }
     }
+    tn.finish(&st);
     body["input"] = Value::Array(input);
 
     let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
@@ -504,11 +595,12 @@ async fn non_stream(st: &AppState, mut t: Turn, first: reqwest::Response) -> Res
         return raw_response(bytes);
     }
     let first_obj = cur.clone();
-    let mut usage = Value::Null;
+    let (mut usage, mut totals) = (Value::Null, Value::Null);
     let mut rounds: Vec<RoundRec> = vec![];
     let mut conts = 0;
     let last = loop {
-        add_usage(&mut usage, &cur["usage"]);
+        merge_usage(&mut usage, &mut totals, &cur["usage"]);
+        turn::note_usage(st, &t.ctx.session, &cur["usage"]);
         let items = cur["output"].as_array().cloned().unwrap_or_default();
         let completed = cur.get("status").and_then(Value::as_str).is_none_or(|s| s == "completed");
         let (results, cont) = after_round(st, &t.ctx, &items, completed, conts).await;
@@ -546,8 +638,12 @@ async fn non_stream(st: &AppState, mut t: Turn, first: reqwest::Response) -> Res
     if !usage.is_null() {
         merged["usage"] = usage;
     }
+    trace_usage(st, &t.ctx, &totals, &merged["usage"], rounds.len());
     let mut r = raw_response(Bytes::from(serde_json::to_vec(&merged).unwrap_or_default()));
     r.headers_mut().insert("content-type", HeaderValue::from_static("application/json"));
+    if let Some(h) = usage_header(&totals, rounds.len()) {
+        r.headers_mut().insert("x-unimem-usage", h);
+    }
     r
 }
 
@@ -685,7 +781,7 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
     let mut p = Pump { tx, seq: 0, next_out: 0, first_round: true, created: None };
     let mut resp = first;
     let mut rounds: Vec<RoundRec> = vec![];
-    let mut usage = Value::Null;
+    let (mut usage, mut totals) = (Value::Null, Value::Null);
     let mut last_terminal: Option<Value> = None;
     let mut conts = 0;
     loop {
@@ -699,7 +795,8 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
         let items = r.items();
         let completed = r.terminal.as_ref().is_some_and(|x| ty(x) == "response.completed");
         if let Some(term) = &r.terminal {
-            add_usage(&mut usage, &term["response"]["usage"]);
+            merge_usage(&mut usage, &mut totals, &term["response"]["usage"]);
+            turn::note_usage(&st, &t.ctx.session, &term["response"]["usage"]);
             last_terminal = Some(term.clone());
         }
         let (results, cont) = after_round(&st, &t.ctx, &items, completed, conts).await;
@@ -726,11 +823,13 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
     let visible = finalize(&st, &t, &rounds);
     // No terminal event at all (first round truncated): end like the upstream did.
     let Some(mut term) = last_terminal else { return };
+    trace_usage(&st, &t.ctx, &totals, &usage, rounds.len());
     let obj = &mut term["response"];
     obj["output"] = Value::Array(visible);
     if !usage.is_null() {
         obj["usage"] = usage;
     }
+
     if !t.chained {
         if let Some(c) = &p.created {
             obj["id"] = c["id"].clone();
@@ -740,6 +839,12 @@ async fn stream_task(st: Shared, mut t: Turn, first: reqwest::Response, tx: mpsc
         }
     }
     let _ = p.emit(term).await;
+    if rounds.len() > 1 {
+        // true totals over all upstream rounds, as an SSE comment (ignored by clients; see `x-unimem-usage`)
+        let mut tt = totals;
+        tt["rounds"] = json!(rounds.len());
+        let _ = p.tx.send(Bytes::from(format!(": x-unimem-usage {tt}\n\n"))).await;
+    }
 }
 
 #[cfg(test)]

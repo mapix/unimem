@@ -330,12 +330,19 @@ async fn non_stream_merges_rounds_and_sums_usage() {
     let u1 = json!({"role":"user","content":"how do we deploy?"});
     let r = e.post("/v1/messages", &agent_req(json!([u1.clone()]), false)).await;
     assert!(r.status().is_success());
+    let totals: Value = serde_json::from_str(r.headers()["x-unimem-usage"].to_str().unwrap()).unwrap();
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["content"], json!([{"type":"text","text":"Checking memory."},{"type":"text","text":"Nothing recorded."}]));
     assert_eq!(v["stop_reason"], "end_turn");
-    assert_eq!(v["usage"]["input_tokens"], 220);
+    // honest usage: input side = the last round (the real context size), output summed over rounds
+    assert_eq!(v["usage"]["input_tokens"], 120);
     assert_eq!(v["usage"]["output_tokens"], 17);
-    assert_eq!(v["usage"]["cache_read_input_tokens"], 130);
+    assert_eq!(v["usage"]["cache_read_input_tokens"], 80);
+    // true billing totals over both upstream rounds in the header
+    assert_eq!(totals["input_tokens"], 220);
+    assert_eq!(totals["cache_read_input_tokens"], 130);
+    assert_eq!(totals["output_tokens"], 17);
+    assert_eq!(totals["rounds"], 2);
     assert_eq!(v["id"], "m1");
 
     let seen = e.seen();

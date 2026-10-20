@@ -22,6 +22,36 @@ pub trait Embedder: Send + Sync {
     async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
         self.embed_one(text).await
     }
+    /// Raw cosine at or above which two notes are candidates for the write-time near-duplicate shortcut (the
+    /// shortcut also requires lexical skeleton agreement). Per embedder family: hash 0.97, transformers 0.95.
+    fn near_dup_cos(&self) -> f32 {
+        near_dup_for(&self.id())
+    }
+    /// Typical cosine of two unrelated texts (anisotropy baseline). 0 for the hash embedder.
+    fn cos_baseline(&self) -> f32 {
+        cos_baseline_for(&self.id())
+    }
+}
+
+/// Default near-duplicate cosine by embedder id (override: `embedder.near_dup_cos`).
+pub fn near_dup_for(id: &str) -> f32 {
+    let id = id.to_lowercase();
+    if id.starts_with("hash") {
+        0.97
+    } else {
+        0.95
+    }
+}
+
+/// Default anisotropy baseline by embedder id (override: `embedder.cos_baseline`). E5: median cosine of random
+/// LoCoMo turn pairs is 0.82 (bench/std/RESULTS.md); we use a slightly lower value so that weak relations survive.
+pub fn cos_baseline_for(id: &str) -> f32 {
+    let id = id.to_lowercase();
+    if id.contains("e5") {
+        0.75
+    } else {
+        0.0
+    }
 }
 
 pub struct HashEmbedder {
@@ -281,5 +311,14 @@ mod tests {
         let b = e.embed_sync("deployment goes through the ops deploy script");
         let c = e.embed_sync("the month-end job runs at 22:00");
         assert!(cosine(&a, &b) > cosine(&a, &c));
+    }
+
+    #[test]
+    fn per_embedder_calibration() {
+        let h = HashEmbedder { dim: 64 };
+        assert_eq!(h.near_dup_cos(), 0.97);
+        assert_eq!(h.cos_baseline(), 0.0);
+        assert_eq!(near_dup_for("onnx:multilingual-e5-small"), 0.95);
+        assert_eq!(cos_baseline_for("onnx:multilingual-e5-small"), 0.75);
     }
 }

@@ -37,8 +37,13 @@
 //! blocks (thinking/signatures, citations and cache_control are ignored), so it is computed identically from
 //! what we streamed and from what the harness later sends back.
 //!
-//! `count_tokens` is a passthrough that also appends our tool definitions (when the body has tools), so the
-//! harness's context estimate includes them. Overlays are not replayed there.
+//! `count_tokens` appends our tool definitions (when the body has tools) and replays the overlays, so the harness's
+//! context estimate matches the request unimem actually sends.
+//!
+//! v0.4 (see `turn.rs`): tool-result turns may get a tool-error recall block appended after their `tool_result`s
+//! (stored as an `augment_user` overlay like prompt augmentations); the harness's compaction request is passed
+//! through untouched; merged usage reports the last round's input side and summed output (true totals in
+//! `x-unimem-usage`).
 
 use axum::{
     body::Bytes,
@@ -47,12 +52,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::StreamExt;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+use super::turn::{self, Live, Turn};
 use super::{
-    aug_anchor, build_augmentation, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, record_turn, relay,
-    response_headers, send_json, session_from_metadata, sse, sse_response, upstream_error, AppState, ReqInfo, Shared,
+    aug_anchor, decode_body, detect_harness, exp_anchor, find_cwd, forward_headers, header_str, join_url, make_ctx, merge_usage, record_turn, relay,
+    response_headers, send_json, session_from_metadata, sse, sse_response, trace_usage, upstream_error, usage_header, AppState, ReqInfo, Shared,
 };
 use crate::engine::Ctx;
 use crate::tools;
@@ -214,6 +220,10 @@ fn req_info(headers: &HeaderMap, body: &Value) -> ReqInfo {
 
 struct Replayed {
     messages: Vec<Value>,
+    /// Augment anchors whose (non-empty) text was replayed.
+    anchors: Vec<String>,
+    /// Hidden rounds replayed (expansion messages and trailing results).
+    hidden: Vec<Value>,
     /// Key of the last harness-visible message and of the one before it.
     last_key: Option<String>,
     last_prev_key: String,
@@ -225,6 +235,8 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Replayed {
     let last_role = orig.last().and_then(|m| m["role"].as_str()).unwrap_or("").to_string();
     let mut out: Vec<Value> = Vec::with_capacity(orig.len() + 4);
     let mut pending: Option<Vec<Value>> = None;
+    let mut anchors = vec![];
+    let mut hidden = vec![];
     for (i, m) in orig.into_iter().enumerate() {
         let prev = if i == 0 { "" } else { keys[i - 1].as_str() };
         let role = m["role"].as_str().unwrap_or("").to_string();
@@ -241,8 +253,10 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Replayed {
                     if let (Some(cc), Some(last)) = (cache_control_of(&m), msgs.last_mut()) {
                         put_cache_control(last, cc);
                     }
+                    hidden.extend(msgs.iter().take(msgs.len().saturating_sub(1)).cloned());
                     out.extend(msgs);
                     pending = p["trailing_results"].as_array().filter(|a| !a.is_empty()).cloned();
+                    hidden.extend(pending.iter().flatten().cloned());
                 }
                 _ => out.push(m),
             }
@@ -251,9 +265,11 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Replayed {
             if let Some(p) = pending.take() {
                 prepend_blocks(&mut m, p);
             }
-            if let Some((k, p)) = st.engine.store.get_overlay(&aug_anchor(session, prev, &keys[i]), session) {
+            let anchor = aug_anchor(session, prev, &keys[i]);
+            if let Some((k, p)) = st.engine.store.get_overlay(&anchor, session) {
                 if let Some(t) = p["text"].as_str().filter(|t| k == K_AUG && !t.is_empty()) {
                     append_text(&mut m, t);
+                    anchors.push(anchor);
                 }
             }
             out.push(m);
@@ -263,7 +279,7 @@ fn replay(st: &AppState, session: &str, orig: Vec<Value>) -> Replayed {
         out.push(json!({"role": "user", "content": p}));
     }
     let n = keys.len();
-    Replayed { messages: out, last_key: keys.last().cloned(), last_prev_key: if n >= 2 { keys[n - 2].clone() } else { String::new() }, last_role }
+    Replayed { messages: out, anchors, hidden, last_key: keys.last().cloned(), last_prev_key: if n >= 2 { keys[n - 2].clone() } else { String::new() }, last_role }
 }
 
 // ================================================================ rounds & finalization
@@ -352,20 +368,6 @@ fn finalize(st: &AppState, ctx: &Ctx, prev_key: Option<&str>, mut rounds: Vec<Ro
     visible
 }
 
-fn sum_usage(acc: &mut Map<String, Value>, u: &Value) {
-    let Some(u) = u.as_object() else { return };
-    for (k, v) in u {
-        match (acc.get(k).and_then(Value::as_u64), v.as_u64()) {
-            (Some(a), Some(b)) => {
-                acc.insert(k.clone(), json!(a + b));
-            }
-            _ => {
-                acc.insert(k.clone(), v.clone());
-            }
-        }
-    }
-}
-
 // ================================================================ handlers
 
 async fn raw_passthrough(st: &AppState, url: &str, h: &HeaderMap, bytes: Bytes) -> Response {
@@ -387,6 +389,36 @@ fn inject_tools(body: &mut Value) {
     }
 }
 
+/// Text of the tool_result blocks of a user message ("" when it has none).
+fn tool_results_text(m: &Value) -> String {
+    if m["role"] != "user" {
+        return String::new();
+    }
+    let mut out = vec![];
+    for b in blocks(&m["content"]).iter().filter(|b| btype(b) == "tool_result") {
+        match &b["content"] {
+            Value::String(s) => out.push(s.clone()),
+            c @ Value::Array(_) => out.push(text_of_blocks(&blocks(c))),
+            _ => {}
+        }
+        if b["is_error"] == true {
+            out.push("error: tool call failed".into());
+        }
+    }
+    out.join("\n")
+}
+
+/// Inputs of the (harness) tool calls answered by the tool results in `user`.
+fn tool_commands(assistant: &Value, user: &Value) -> String {
+    let ids: Vec<String> = blocks(&user["content"]).iter().filter_map(|b| b.get("tool_use_id").and_then(Value::as_str).map(String::from)).collect();
+    blocks(&assistant["content"])
+        .iter()
+        .filter(|b| btype(b) == "tool_use" && b["id"].as_str().is_some_and(|i| ids.iter().any(|x| x == i)))
+        .map(|b| b["input"].get("command").and_then(Value::as_str).map(String::from).unwrap_or_else(|| b["input"].to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn has_tools(body: &Value) -> bool {
     body.get("tools").and_then(Value::as_array).is_some_and(|t| !t.is_empty())
 }
@@ -406,6 +438,11 @@ pub async fn count_tokens(State(st): State<Shared>, req: Request) -> Response {
     match parsed {
         Some(mut v) if has_tools(&v) => {
             inject_tools(&mut v);
+            // count what will really be sent: replayed hidden rounds and augmentations included
+            if let Some(orig) = v["messages"].as_array().cloned() {
+                let info = req_info(&parts.headers, &v);
+                v["messages"] = Value::Array(replay(&st, &info.session, orig).messages);
+            }
             match send_json(&st, &url, &forward_headers(&parts.headers), &v).await {
                 Ok(r) => relay(r),
                 Err(e) => upstream_error(e),
@@ -433,12 +470,24 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
         return raw_passthrough(&st, &url, &parts.headers, bytes).await;
     }
 
+    let orig = body["messages"].as_array().cloned().unwrap_or_default();
+    // The harness asking the model to summarize the conversation (its compaction request): pass through untouched.
+    if orig.last().is_some_and(|m| m["role"] == "user" && turn::is_compaction_request(&text_of_blocks(&blocks(&m["content"])))) {
+        st.engine.store.trace("compaction_request", &json!({"dialect": "anthropic", "msgs": orig.len()}));
+        return raw_passthrough(&st, &url, &parts.headers, bytes).await;
+    }
+
     let info = req_info(&parts.headers, &body);
     let ctx = make_ctx(&st, &info);
 
     // 1. overlay replay
-    let orig = body["messages"].as_array().cloned().unwrap_or_default();
     let prompt = orig.last().and_then(prompt_text);
+    let first_user = orig.iter().find(|m| m["role"] == "user");
+    let first_hash = first_user.map(|m| user_key(&m["content"])).unwrap_or_default();
+    let summary_key = first_user.filter(|m| turn::has_summary_marker(&text_of_blocks(&blocks(&m["content"])))).map(|m| user_key(&m["content"]));
+    let n_orig = orig.len();
+    let last_orig = orig.last().cloned().unwrap_or(Value::Null);
+    let prev_orig = if n_orig >= 2 { orig[n_orig - 2].clone() } else { Value::Null };
     let rp = replay(&st, &info.session, orig);
     let mut messages = rp.messages;
 
@@ -446,11 +495,22 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
     if st.engine.cfg.inject.tools {
         inject_tools(&mut body);
     }
-    if let (Some(text), Some(last_key)) = (prompt.as_deref(), rp.last_key.as_deref()) {
+    let model = body["model"].as_str().unwrap_or("").to_string();
+    let beta = header_str(&parts.headers, "anthropic-beta").unwrap_or_default();
+    let live = Live::scan(&json!({"system": body["system"], "tools": body["tools"], "messages": messages}), rp.anchors.clone(), n_orig, first_hash, summary_key).with_hidden(&rp.hidden);
+    let mut tn = Turn::begin(&st, &ctx, live, &model, &beta);
+    if let Some(last_key) = rp.last_key.as_deref() {
         let anchor = aug_anchor(&info.session, &rp.last_prev_key, last_key);
-        if st.engine.store.get_overlay(&anchor, &info.session).is_none() {
-            record_turn(&st, &ctx, "user", text);
-            let aug = build_augmentation(&st, &ctx, text).await;
+        let results = tool_results_text(&last_orig);
+        if (prompt.is_some() || !results.is_empty()) && st.engine.store.get_overlay(&anchor, &info.session).is_none() {
+            let aug = match prompt.as_deref() {
+                Some(text) => {
+                    record_turn(&st, &ctx, "user", text);
+                    tn.prompt_augmentation(&st, &ctx, text, &anchor).await
+                }
+                // tool-result turn: the text goes after the tool_result blocks of the same user message
+                None => tn.tool_augmentation(&st, &ctx, &results, &tool_commands(&prev_orig, &last_orig), &anchor).await,
+            };
             if let (Some(a), Some(m)) = (aug.as_deref(), messages.last_mut()) {
                 append_text(m, a);
             }
@@ -459,6 +519,7 @@ pub async fn handle(State(st): State<Shared>, req: Request) -> Response {
             }
         }
     }
+    tn.finish(&st);
     body["messages"] = Value::Array(messages);
 
     // The expansion overlay of the response is keyed on the message the response will follow.
@@ -511,11 +572,12 @@ async fn non_stream(st: &AppState, ctx: &Ctx, url: &str, headers: &reqwest::head
         return raw_response(bytes);
     }
     let mut merged = cur.clone();
-    let mut usage = Map::new();
+    let (mut usage, mut totals) = (Value::Null, Value::Null);
     let mut rounds: Vec<RoundRec> = vec![];
     let mut conts = 0;
     loop {
-        sum_usage(&mut usage, &cur["usage"]);
+        merge_usage(&mut usage, &mut totals, &cur["usage"]);
+        turn::note_usage(st, &ctx.session, &cur["usage"]);
         let content = cur["content"].as_array().cloned().unwrap_or_default();
         let stop = cur["stop_reason"].as_str().unwrap_or("").to_string();
         merged["stop_reason"] = cur["stop_reason"].clone();
@@ -545,10 +607,17 @@ async fn non_stream(st: &AppState, ctx: &Ctx, url: &str, headers: &reqwest::head
         }
     }
     merged["stop_reason"] = visible_stop(&rounds, merged["stop_reason"].clone());
+    let n_rounds = rounds.len();
     merged["content"] = Value::Array(finalize(st, ctx, prev_key, rounds));
-    merged["usage"] = Value::Object(usage);
+    if !usage.is_null() {
+        merged["usage"] = usage;
+    }
+    trace_usage(st, ctx, &totals, &merged["usage"], n_rounds);
     let mut r = raw_response(Bytes::from(serde_json::to_vec(&merged).unwrap_or_default()));
     r.headers_mut().insert("content-type", HeaderValue::from_static("application/json"));
+    if let Some(h) = usage_header(&totals, n_rounds) {
+        r.headers_mut().insert("x-unimem-usage", h);
+    }
     r
 }
 
@@ -616,6 +685,8 @@ struct Pump<'a> {
     stop_reason: Value,
     stop_sequence: Value,
     usage: Value,
+    /// Usage from this round's `message_start` (input side).
+    start_usage: Value,
 }
 
 impl Pump<'_> {
@@ -631,6 +702,7 @@ impl Pump<'_> {
         let ty = btype(&j).to_string();
         let ok = match ty.as_str() {
             "message_start" => {
+                self.start_usage = j["message"]["usage"].clone();
                 if *self.started {
                     true
                 } else {
@@ -752,12 +824,12 @@ async fn stream_task(
     let mut rounds: Vec<RoundRec> = vec![];
     let mut out_next = 0usize;
     let mut started = false;
-    let mut usage = Map::new();
+    let (mut usage, mut totals, mut first_delta) = (Value::Null, Value::Null, Value::Null);
     let mut last_stop: Value;
     let mut last_seq: Value;
     let mut conts = 0;
     loop {
-        let mut p = Pump { tx: &tx, out_next: &mut out_next, started: &mut started, blocks: vec![], stop_reason: Value::Null, stop_sequence: Value::Null, usage: Value::Null };
+        let mut p = Pump { tx: &tx, out_next: &mut out_next, started: &mut started, blocks: vec![], stop_reason: Value::Null, stop_sequence: Value::Null, usage: Value::Null, start_usage: Value::Null };
         let end = pump_round(resp, &mut p).await;
         if matches!(end, RoundEnd::ClientGone | RoundEnd::UpstreamError) {
             tracing::debug!("stream ended early: {end:?}");
@@ -767,7 +839,18 @@ async fn stream_task(
             p.close_open().await;
         }
         let content = p.content();
-        sum_usage(&mut usage, &p.usage);
+        // the round's usage: message_start (input side) overlaid with message_delta (final counters)
+        let mut ru = if p.start_usage.is_object() { p.start_usage.clone() } else { json!({}) };
+        if let (Some(a), Some(d)) = (ru.as_object_mut(), p.usage.as_object()) {
+            for (k, v) in d {
+                a.insert(k.clone(), v.clone());
+            }
+        }
+        if rounds.is_empty() {
+            first_delta = p.usage.clone();
+        }
+        merge_usage(&mut usage, &mut totals, &ru);
+        turn::note_usage(&st, &ctx.session, &ru);
         last_stop = if p.stop_reason.is_null() { json!("end_turn") } else { p.stop_reason.clone() };
         last_seq = p.stop_sequence.clone();
         let stop = if end == RoundEnd::Complete { last_stop.as_str().unwrap_or("").to_string() } else { String::new() };
@@ -792,15 +875,30 @@ async fn stream_task(
         }
     }
     let stop = visible_stop(&rounds, last_stop);
+    let n_rounds = rounds.len();
     finalize(&st, &ctx, prev_key.as_deref(), rounds);
     if !started {
         return; // nothing was ever streamed; nothing sensible to close
     }
-    if !usage.contains_key("output_tokens") {
-        usage.insert("output_tokens".into(), json!(0));
+    // one round: exactly what the upstream sent; several: last round's input side + summed output
+    if n_rounds <= 1 {
+        usage = first_delta;
     }
+    if !usage.is_object() {
+        usage = json!({});
+    }
+    if usage.get("output_tokens").is_none() {
+        usage["output_tokens"] = json!(0);
+    }
+    trace_usage(&st, &ctx, &totals, &usage, n_rounds);
     let delta = json!({"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": last_seq}, "usage": usage});
     let _ = tx.send(sse::encode_json(Some("message_delta"), &delta)).await;
+    if n_rounds > 1 {
+        // true totals over all upstream rounds, as an SSE comment (ignored by clients; see `x-unimem-usage`)
+        let mut t = totals.clone();
+        t["rounds"] = json!(n_rounds);
+        let _ = tx.send(Bytes::from(format!(": x-unimem-usage {t}\n\n"))).await;
+    }
     let _ = tx.send(sse::encode_json(Some("message_stop"), &json!({"type": "message_stop"}))).await;
 }
 

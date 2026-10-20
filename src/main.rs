@@ -497,6 +497,15 @@ async fn serve(mut cfg: Config, listen: Option<String>) -> Result<()> {
                     Ok(n) => tracing::info!("gc: removed {n} overlays older than 30 days"),
                     Err(err) => tracing::warn!("overlay gc failed: {err}"),
                 }
+                let _ = e.store.gc_session_state(30 * 86400);
+                let ttl = e.cfg.distill.episode_ttl_days as i64 * 86400;
+                if ttl > 0 {
+                    match e.store.gc_episodes(ttl) {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!("gc: removed {n} episodes older than {} days", e.cfg.distill.episode_ttl_days),
+                        Err(err) => tracing::warn!("episode gc failed: {err}"),
+                    }
+                }
             }
         });
     }

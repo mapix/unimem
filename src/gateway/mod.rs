@@ -6,6 +6,7 @@ pub mod chat;
 pub mod mcp;
 pub mod responses;
 pub mod sse;
+pub mod turn;
 
 use axum::{
     body::{Body, Bytes},
@@ -204,13 +205,16 @@ pub fn join_url(base: &str, path: &str, query: Option<&str>) -> String {
 }
 
 pub async fn send_json(st: &AppState, url: &str, headers: &reqwest::header::HeaderMap, body: &Value) -> reqwest::Result<reqwest::Response> {
-    st.client
+    let r = st.client
         .post(url)
         .headers(headers.clone())
         .header("content-type", "application/json")
         .body(serde_json::to_vec(body).unwrap_or_default())
         .send()
-        .await
+        .await?;
+    // rate-limit headroom gates background distillation on the user's quota
+    crate::distill::note_rate_limit(&st.engine, r.headers());
+    Ok(r)
 }
 
 pub fn upstream_error(e: impl std::fmt::Display) -> Response {
@@ -282,6 +286,7 @@ pub fn exp_anchor(session: &str, prev_key: &str, visible_key: &str) -> String {
 }
 
 /// Build the augmentation text for a new user prompt: optional session preamble + passive recall.
+/// v0.3 entry point, kept for scripts; the dialects use [`turn::Turn`] (budgets, de-dup, compaction).
 pub async fn build_augmentation(st: &AppState, ctx: &Ctx, prompt: &str) -> Option<String> {
     let cfg = &st.engine.cfg.inject;
     let mut parts: Vec<String> = vec![];
@@ -318,7 +323,7 @@ pub fn record_turn(st: &AppState, ctx: &Ctx, role: &str, text: &str) {
     if !st.engine.cfg.inject.record_episodes {
         return;
     }
-    let t = strip_harness_noise(text);
+    let t = crate::screen::redact_secrets(&strip_harness_noise(text));
     if t.chars().count() < 2 {
         return;
     }
@@ -327,8 +332,62 @@ pub fn record_turn(st: &AppState, ctx: &Ctx, role: &str, text: &str) {
 
 pub fn make_ctx(st: &AppState, info: &ReqInfo) -> Ctx {
     let ctx = st.engine.ctx_for(&info.harness, &info.session, info.cwd.as_deref());
-    let _ = st.engine.store.touch_session(&info.session, &info.harness, ctx.pid(), info.cwd.as_deref());
+    let new = st.engine.store.touch_session(&info.session, &info.harness, ctx.pid(), info.cwd.as_deref()).unwrap_or(false);
+    // Session-end signal: a new session of the same harness in the same project ends the previous one.
+    if let (true, Some(pid)) = (new, ctx.pid()) {
+        if let Some(prev) = st.engine.store.previous_session_in_project(&info.session, &info.harness, pid) {
+            crate::distill::spawn_session(st.engine.clone(), prev, "new_session_in_project");
+        }
+    }
     ctx
+}
+
+/// Merge the usage of one more round: input-side counters (`input_tokens`, `cache_*`, `prompt_tokens`, their
+/// details) take the *last* round's value — that is what the context actually is — while output-side counters
+/// (`output_tokens`, `completion_tokens`, their details) are summed. `total_tokens` is recomputed when present.
+/// `totals` sums everything (true billing, exposed in `x-unimem-usage` and traces).
+pub fn merge_usage(acc: &mut Value, totals: &mut Value, u: &Value) {
+    fn walk(acc: &mut Value, u: &Value, out_side: bool, sum_all: bool) {
+        let Some(u) = u.as_object() else { return };
+        if !acc.is_object() {
+            *acc = json!({});
+        }
+        let Some(a) = acc.as_object_mut() else { return };
+        for (k, v) in u {
+            let o = out_side || k.contains("output") || k.contains("completion");
+            match a.get_mut(k) {
+                Some(x) if x.is_object() && v.is_object() => walk(x, v, o, sum_all),
+                Some(x) if x.is_u64() && v.is_u64() && (o || sum_all) => *x = json!(x.as_u64().unwrap_or(0) + v.as_u64().unwrap_or(0)),
+                _ => {
+                    a.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    walk(acc, u, false, false);
+    walk(totals, u, false, true);
+    if acc.get("total_tokens").is_some() {
+        let g = |k: &str| acc.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let total = g("input_tokens") + g("output_tokens") + g("prompt_tokens") + g("completion_tokens");
+        acc["total_tokens"] = json!(total);
+    }
+}
+
+/// `x-unimem-usage`: summed usage over all upstream rounds of this visible response.
+pub fn usage_header(totals: &Value, rounds: usize) -> Option<HeaderValue> {
+    let mut v = totals.clone();
+    if !v.is_object() {
+        return None;
+    }
+    v["rounds"] = json!(rounds);
+    HeaderValue::from_str(&v.to_string()).ok()
+}
+
+/// Trace the true usage of a merged response (all rounds summed) next to what the client was told.
+pub fn trace_usage(st: &AppState, ctx: &Ctx, totals: &Value, reported: &Value, rounds: usize) {
+    if rounds > 1 {
+        st.engine.store.trace("usage", &json!({"session": ctx.session, "rounds": rounds, "total": totals, "reported": reported}));
+    }
 }
 
 // ---------------------------------------------------------------- tiny local HTTP API (for scripts / hooks)
