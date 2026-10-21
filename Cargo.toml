@@ -50,7 +50,7 @@ tokio-stream = "0.1"
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ulid = "1"
+ulid = "3"
 zstd = "0.13"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 # optional local transformer embedder (`--features onnx`); ONNX Runtime is loaded at runtime via ORT_DYLIB_PATH
