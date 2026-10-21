@@ -54,7 +54,7 @@ ulid = "1"
 zstd = "0.13"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 # optional local transformer embedder (`--features onnx`); ONNX Runtime is loaded at runtime via ORT_DYLIB_PATH
-ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"], optional = true }
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic"], optional = true }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"], optional = true }
 # Snowball English stemmer for the standard BM25 baseline in unimem-std-bench
 rust-stemmers = "1.2"
